@@ -1,0 +1,23 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "db/migration"
+    queries: "db/query"
+    gen:
+      go:
+        package: "db"
+        out: "internal/db"
+        sql_package: "pgx/v5"              # pgx を直接使うコードを生成
+        emit_interface: true               # Querier interface を生成（テスト用）
+        emit_empty_slices: true            # 0件のとき nil ではなく [] を返す
+        emit_pointers_for_null_types: true # NULL可カラムを *string などにする
+        overrides:
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          - db_type: "date"
+            go_type: "time.Time"
