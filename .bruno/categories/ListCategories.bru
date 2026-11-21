@@ -5,9 +5,13 @@ meta {
 }
 
 get {
-  url: http://localhost:8080/api/v1/categories
+  url: {{baseUrl}}/categories
   body: none
-  auth: inherit
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
 }
 
 settings {

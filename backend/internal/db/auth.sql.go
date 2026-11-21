@@ -45,14 +45,31 @@ func (q *Queries) GetMe(ctx context.Context, id int64) (GetMeRow, error) {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, name, role, approver_id, created_at, updated_at
-FROM users
-WHERE email = $1
+SELECT
+    u.id,
+    u.email,
+    u.password_hash,
+    u.name,
+    u.role,
+    u.approver_id,
+    EXISTS (SELECT 1 FROM users direct_reports WHERE direct_reports.approver_id = u.id) AS is_approver
+FROM users u
+WHERE u.email = $1
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+type GetUserByEmailRow struct {
+	ID           int64
+	Email        string
+	PasswordHash string
+	Name         string
+	Role         string
+	ApproverID   *int64
+	IsApprover   bool
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
-	var i User
+	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -60,8 +77,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Name,
 		&i.Role,
 		&i.ApproverID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+		&i.IsApprover,
 	)
 	return i, err
 }

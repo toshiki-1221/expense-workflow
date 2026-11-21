@@ -17,7 +17,7 @@ type Querier interface {
 	DeleteExpenseItem(ctx context.Context, arg DeleteExpenseItemParams) (int64, error)
 	GetExpenseReport(ctx context.Context, arg GetExpenseReportParams) (ExpenseReport, error)
 	GetMe(ctx context.Context, id int64) (GetMeRow, error)
-	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	ListAccountingExpenseReports(ctx context.Context, arg ListAccountingExpenseReportsParams) ([]ListAccountingExpenseReportsRow, error)
 	ListExpenseCategories(ctx context.Context) ([]ExpenseCategory, error)
 	ListExpenseReportApprovalLogs(ctx context.Context, reportID int64) ([]ApprovalLog, error)
