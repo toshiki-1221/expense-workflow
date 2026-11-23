@@ -54,6 +54,11 @@ func run() error {
 	categoryService := service.NewCategoryService(categoryRepository)
 	categoryHandler := handler.NewCategoryHandler(categoryService)
 
+	// 申請と明細をまとめて保存するので、トランザクション用に pool も渡す
+	reportRepository := repository.NewReportRepository(pool, queries)
+	reportService := service.NewReportService(reportRepository)
+	reportHandler := handler.NewReportHandler(reportService)
+
 	r := gin.Default()
 	// 既定ではすべてのプロキシを信頼し、X-Forwarded-For で c.ClientIP() を偽装できてしまう。
 	// nil のときは誰も信頼せず、接続元のIPを使う。
@@ -68,6 +73,7 @@ func run() error {
 	authed := v1.Group("", middleware.Authenticate(tokens))
 	authed.GET("/me", authHandler.Me)
 	authed.GET("/categories", categoryHandler.List)
+	authed.POST("/reports", reportHandler.Create)
 	// 経理APIを作るとき:
 	// accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))
 
