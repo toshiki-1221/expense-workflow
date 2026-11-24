@@ -66,11 +66,7 @@ func (r *ReportRepository) CreateReport(ctx context.Context, userID int64, title
 			UserID:      userID,
 		})
 		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
-				return nil, domain.ErrInvalidCategory // 存在しない category_id
-			}
-			return nil, fmt.Errorf("create expense item: %w", err)
+			return nil, itemWriteError("create expense item", err)
 		}
 		report.Items = append(report.Items, toDomainReportItem(item))
 	}
@@ -80,6 +76,94 @@ func (r *ReportRepository) CreateReport(ctx context.Context, userID int64, title
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 	return report, nil
+}
+
+// UpdateReport は申請の件名と明細を1トランザクションで更新する（draft / rejected のときだけ）。
+// 明細は差分で反映する：id なし＝追加、id あり＝更新、いまあるのに送られてこなかった＝削除。
+// 状態が変わっていた・この申請にない明細 id があったときは domain.ErrInvalidStatus を返す（画面を開き直してもらう）。
+func (r *ReportRepository) UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := r.queries.WithTx(tx)
+
+	// 1. 件名を更新する。この UPDATE で申請の行がロックされるので、
+	//    コミットまでのあいだに申請や別の更新が割り込んでこない
+	if _, err := q.UpdateExpenseReport(ctx, db.UpdateExpenseReportParams{
+		Title:  title,
+		ID:     reportID,
+		UserID: userID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrInvalidStatus // 本人でない・申請中などに変わっていた
+		}
+		return fmt.Errorf("update expense report: %w", err)
+	}
+
+	// 2. ロックしたあとの明細と比べて差分を出す（Service で見た明細より新しい可能性がある）
+	rows, err := q.ListExpenseReportItems(ctx, reportID)
+	if err != nil {
+		return fmt.Errorf("list expense report items: %w", err)
+	}
+	existing := make([]domain.ReportItem, 0, len(rows))
+	for _, row := range rows {
+		existing = append(existing, domain.ReportItem{ID: row.ID})
+	}
+	changes, err := domain.DiffItems(existing, items)
+	if err != nil {
+		return domain.ErrInvalidStatus // 別の更新で消えた明細を送ってきた
+	}
+
+	// 3. 削除 → 更新 → 追加 の順に反映する
+	for _, id := range changes.Delete {
+		if _, err := q.DeleteExpenseItem(ctx, db.DeleteExpenseItemParams{ID: id, ReportID: reportID, UserID: userID}); err != nil {
+			return fmt.Errorf("delete expense item: %w", err)
+		}
+	}
+	for _, in := range changes.Update {
+		_, err := q.UpdateExpenseItem(ctx, db.UpdateExpenseItemParams{
+			CategoryID:  in.CategoryID,
+			UsedOn:      in.UsedOn,
+			Amount:      in.Amount,
+			Description: in.Description,
+			ID:          in.ID,
+			ReportID:    reportID,
+			UserID:      userID,
+		})
+		if err != nil {
+			return itemWriteError("update expense item", err)
+		}
+	}
+	for _, in := range changes.Create {
+		_, err := q.CreateExpenseItem(ctx, db.CreateExpenseItemParams{
+			ReportID:    reportID,
+			CategoryID:  in.CategoryID,
+			UsedOn:      in.UsedOn,
+			Amount:      in.Amount,
+			Description: in.Description,
+			UserID:      userID,
+		})
+		if err != nil {
+			return itemWriteError("create expense item", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+// itemWriteError は明細の保存エラーを変換する。存在しない category_id なら domain.ErrInvalidCategory にする。
+func itemWriteError(op string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+		return domain.ErrInvalidCategory
+	}
+	return fmt.Errorf("%s: %w", op, err)
 }
 
 // GetReport は申請を明細・履歴つきで取得する。誰が見てよいかはここでは判定しない（Service の担当）。

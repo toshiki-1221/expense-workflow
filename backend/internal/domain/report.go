@@ -170,10 +170,49 @@ type ReportItem struct {
 
 // ReportItemInput は明細を作成・更新するときの入力を表す。
 type ReportItemInput struct {
+	ID          int64 // 更新のときだけ使う。0 は新しい明細（作成のときは常に 0）
 	CategoryID  int64
 	UsedOn      time.Time
 	Amount      int64
 	Description string
+}
+
+// ItemChanges は申請の明細をまとめて送られたときに、DBへ反映する差分を表す。
+type ItemChanges struct {
+	Create []ReportItemInput // id なし → 追加
+	Update []ReportItemInput // id あり → 更新
+	Delete []int64           // いまあるのに送られてこなかった → 削除
+}
+
+// DiffItems は、いまの明細（existing）と画面から送られた明細（inputs）を比べて差分を返す。
+// 全部消して入れ直すと明細IDが変わり、あとで領収書を紐づけるときに困るので、差分で反映する。
+// この申請にない id や、同じ id が2回出てきたときは ErrUnknownItem を返す。
+func DiffItems(existing []ReportItem, inputs []ReportItemInput) (ItemChanges, error) {
+	remaining := make(map[int64]bool, len(existing)) // まだ送られてきていない既存の明細
+	for _, it := range existing {
+		remaining[it.ID] = true
+	}
+
+	changes := ItemChanges{Create: []ReportItemInput{}, Update: []ReportItemInput{}, Delete: []int64{}}
+	for _, in := range inputs {
+		if in.ID == 0 {
+			changes.Create = append(changes.Create, in)
+			continue
+		}
+		if !remaining[in.ID] {
+			return ItemChanges{}, ErrUnknownItem
+		}
+		delete(remaining, in.ID) // 2回目に同じ id が来たら上で弾かれる
+		changes.Update = append(changes.Update, in)
+	}
+
+	// 元の並び順で削除対象を並べる（結果を安定させるため map の順に頼らない）
+	for _, it := range existing {
+		if remaining[it.ID] {
+			changes.Delete = append(changes.Delete, it.ID)
+		}
+	}
+	return changes, nil
 }
 
 // ApprovalLog は申請の状態変更の履歴（誰が・いつ・何をしたか）を表す。
@@ -195,6 +234,7 @@ var (
 	ErrForbidden       = errors.New("forbidden")                // 見られるが、その操作の担当ではない
 	ErrInvalidStatus   = errors.New("invalid report status")    // いまの状態ではその操作ができない（同時操作も含む）
 	ErrNoApprover      = errors.New("approver is not assigned") // 承認者が決まっていないので申請できない
+	ErrUnknownItem     = errors.New("unknown report item")      // この申請にない明細 id が送られてきた
 )
 
 // ValidationError は入力不正の理由を持つエラー。Message はそのまま画面に出せる文言にする。

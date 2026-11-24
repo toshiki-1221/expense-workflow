@@ -21,6 +21,7 @@ type reportRepository interface {
 	ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error)
 	GetReport(ctx context.Context, id int64) (*domain.Report, error)
 	SubmitReport(ctx context.Context, reportID, userID int64) error
+	UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error
 }
 
 // userFinder はログイン中のユーザー（ロール・承認者）を取得する振る舞いを定義する。
@@ -52,6 +53,11 @@ func (s *ReportService) CreateDraft(ctx context.Context, userID int64, title str
 	title = strings.TrimSpace(title)
 	if err := validateDraft(title, items); err != nil {
 		return nil, err
+	}
+	for i, item := range items {
+		if item.ID != 0 {
+			return nil, &domain.ValidationError{Message: fmt.Sprintf("%d件目：新しく作るときは明細の id を指定できません", i+1)}
+		}
 	}
 	created, err := s.repository.CreateReport(ctx, userID, title, items)
 	if err != nil {
@@ -91,6 +97,34 @@ func (s *ReportService) Submit(ctx context.Context, userID, reportID int64) (*Re
 
 	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
 	if err := s.repository.SubmitReport(ctx, reportID, userID); err != nil {
+		return nil, err
+	}
+	return s.GetDetail(ctx, userID, reportID)
+}
+
+// Update は申請の件名と明細を更新し（draft / rejected のみ）、更新後の詳細を返す。
+// 明細は申請ごとまとめて受け取り、差分で反映する（id なし＝追加、id あり＝更新、送られてこなかった＝削除）。
+// 差し戻しの申請を直しても状態は rejected のまま。もう一度出すときは Submit を呼ぶ。
+func (s *ReportService) Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*ReportDetail, error) {
+	viewer, report, err := s.load(ctx, userID, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if err := report.CheckAction(viewer, domain.ReportActionEdit); err != nil {
+		return nil, err
+	}
+
+	title = strings.TrimSpace(title)
+	if err := validateDraft(title, items); err != nil {
+		return nil, err
+	}
+	// この申請にない明細 id は、画面のバグか他人の明細を狙ったものなので 400 にする
+	if _, err := domain.DiffItems(report.Items, items); err != nil {
+		return nil, &domain.ValidationError{Message: "この申請にない明細が含まれています"}
+	}
+
+	// 上のチェックのあとに状態や明細が変わっていても、Repository がロックしてから比べ直す
+	if err := s.repository.UpdateReport(ctx, reportID, userID, title, items); err != nil {
 		return nil, err
 	}
 	return s.GetDetail(ctx, userID, reportID)

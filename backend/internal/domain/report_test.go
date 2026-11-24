@@ -73,6 +73,54 @@ func TestAllowedActions(t *testing.T) {
 	}
 }
 
+func TestDiffItems(t *testing.T) {
+	existing := []ReportItem{{ID: 11}, {ID: 12}, {ID: 13}}
+	ids := func(ins []ReportItemInput) []int64 {
+		out := []int64{}
+		for _, in := range ins {
+			out = append(out, in.ID)
+		}
+		return out
+	}
+
+	tests := []struct {
+		name       string
+		inputs     []ReportItemInput
+		wantCreate int
+		wantUpdate []int64
+		wantDelete []int64
+		wantErr    error
+	}{
+		{"そのまま送り返す", []ReportItemInput{{ID: 11}, {ID: 12}, {ID: 13}}, 0, []int64{11, 12, 13}, []int64{}, nil},
+		{"1件追加", []ReportItemInput{{ID: 11}, {ID: 12}, {ID: 13}, {ID: 0}}, 1, []int64{11, 12, 13}, []int64{}, nil},
+		{"送られてこなかった明細は削除", []ReportItemInput{{ID: 13}}, 0, []int64{13}, []int64{11, 12}, nil},
+		{"追加・更新・削除が混ざる", []ReportItemInput{{ID: 0}, {ID: 12}, {ID: 0}}, 2, []int64{12}, []int64{11, 13}, nil},
+		{"空で送ると全部削除", []ReportItemInput{}, 0, []int64{}, []int64{11, 12, 13}, nil},
+		{"この申請にない id", []ReportItemInput{{ID: 99}}, 0, nil, nil, ErrUnknownItem},
+		{"同じ id が2回", []ReportItemInput{{ID: 11}, {ID: 11}}, 0, nil, nil, ErrUnknownItem},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DiffItems(existing, tt.inputs)
+			if err != tt.wantErr {
+				t.Fatalf("DiffItems() err = %v, want %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if len(got.Create) != tt.wantCreate {
+				t.Errorf("Create = %d件, want %d件", len(got.Create), tt.wantCreate)
+			}
+			if !slices.Equal(ids(got.Update), tt.wantUpdate) {
+				t.Errorf("Update = %v, want %v", ids(got.Update), tt.wantUpdate)
+			}
+			if !slices.Equal(got.Delete, tt.wantDelete) {
+				t.Errorf("Delete = %v, want %v", got.Delete, tt.wantDelete)
+			}
+		})
+	}
+}
+
 func TestCheckAction(t *testing.T) {
 	ownerWithoutApprover := &User{ID: 1, Role: RoleMember}
 

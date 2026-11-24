@@ -26,6 +26,7 @@ type reportService interface {
 	ListMine(ctx context.Context, userID int64, status string) ([]domain.ReportSummary, error)
 	GetDetail(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Submit(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
+	Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 }
 
 // ReportHandler は経費申請APIのHTTP処理を担当する。
@@ -41,6 +42,7 @@ func NewReportHandler(service reportService) *ReportHandler {
 // reportItemRequest は明細1件分のリクエスト項目を表す。
 // 必須・桁数のチェックは Service でまとめて行う。
 type reportItemRequest struct {
+	ID          int64  `json:"id"` // 更新APIで既存の明細を指すときだけ。省略・null は新しい明細
 	CategoryID  int64  `json:"category_id"`
 	UsedOn      string `json:"used_on"`
 	Amount      int64  `json:"amount"`
@@ -180,6 +182,7 @@ func toItemInputs(reqs []reportItemRequest) ([]domain.ReportItemInput, error) {
 			usedOn = t
 		}
 		items = append(items, domain.ReportItemInput{
+			ID:          req.ID,
 			CategoryID:  req.CategoryID,
 			UsedOn:      usedOn,
 			Amount:      req.Amount,
@@ -285,6 +288,34 @@ func (h *ReportHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, toReportResponse(detail))
 }
 
+// Update は申請の件名と明細を更新する（draft / rejected のみ）。
+// ボディは作成と同じ形で、既存の明細には id を付ける。送られてこなかった明細は削除される。
+// PUT /api/v1/reports/:id
+func (h *ReportHandler) Update(c *gin.Context) {
+	userID, reportID, ok := userAndReportID(c)
+	if !ok {
+		return
+	}
+
+	var req createReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "リクエストの形式が正しくありません")
+		return
+	}
+	items, err := toItemInputs(req.Items)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, err.Error())
+		return
+	}
+
+	detail, err := h.service.Update(c.Request.Context(), userID, reportID, req.Title, items)
+	if err != nil {
+		writeReportError(c, err, "update report")
+		return
+	}
+	c.JSON(http.StatusOK, toReportResponse(detail))
+}
+
 // Submit は申請を提出する（draft / rejected → submitted）。ボディは不要。
 // POST /api/v1/reports/:id/submit
 func (h *ReportHandler) Submit(c *gin.Context) {
@@ -324,6 +355,8 @@ func writeReportError(c *gin.Context, err error, op string) {
 	switch {
 	case errors.As(err, &verr):
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, verr.Message)
+	case errors.Is(err, domain.ErrInvalidCategory):
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "存在しない科目が指定されています")
 	case errors.Is(err, domain.ErrNotFound):
 		response.Error(c, http.StatusNotFound, response.CodeNotFound, "申請が見つかりません")
 	case errors.Is(err, domain.ErrUnauthorized):
