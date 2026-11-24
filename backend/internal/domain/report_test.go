@@ -72,3 +72,34 @@ func TestAllowedActions(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckAction(t *testing.T) {
+	ownerWithoutApprover := &User{ID: 1, Role: RoleMember}
+
+	tests := []struct {
+		name   string
+		status ReportStatus
+		viewer *User
+		action ReportAction
+		want   error
+	}{
+		{"下書きを本人が申請", ReportStatusDraft, owner, ReportActionSubmit, nil},
+		{"差し戻しを本人が再申請", ReportStatusRejected, owner, ReportActionSubmit, nil},
+		{"申請中を本人がもう一度申請", ReportStatusSubmitted, owner, ReportActionSubmit, ErrInvalidStatus},
+		{"承認者がいない本人が申請", ReportStatusDraft, ownerWithoutApprover, ReportActionSubmit, ErrNoApprover},
+		{"経理が他人の下書きを申請", ReportStatusDraft, accounting, ReportActionSubmit, ErrForbidden},
+		{"無関係の人が申請", ReportStatusDraft, stranger, ReportActionSubmit, ErrNotFound},
+		{"承認者が承認", ReportStatusSubmitted, approver, ReportActionApprove, nil},
+		{"承認者が承認済みをもう一度承認", ReportStatusApproved, approver, ReportActionApprove, ErrInvalidStatus},
+		{"経理が承認", ReportStatusSubmitted, accounting, ReportActionApprove, ErrForbidden},
+		{"経理が申請中を支払", ReportStatusSubmitted, accounting, ReportActionPay, ErrInvalidStatus},
+		{"承認者が支払", ReportStatusApproved, approver, ReportActionPay, ErrForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := report(tt.status).CheckAction(tt.viewer, tt.action); got != tt.want {
+				t.Errorf("CheckAction() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

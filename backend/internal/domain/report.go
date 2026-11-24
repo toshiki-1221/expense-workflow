@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -108,6 +109,40 @@ func (r *Report) AllowedActions(viewer *User) []ReportAction {
 	return actions
 }
 
+// CheckAction は viewer が action を実行できるかを確かめ、できないときは理由に合ったエラーを返す。
+// 判定そのものは AllowedActions に任せ、ここではエラーの種類（HTTPステータス）を決めるだけにする。
+//   - 見る権限がない        → ErrNotFound（存在を隠す）
+//   - 見られるが担当ではない → ErrForbidden
+//   - 担当だが状態が合わない → ErrInvalidStatus
+func (r *Report) CheckAction(viewer *User, action ReportAction) error {
+	if !r.CanBeViewedBy(viewer) {
+		return ErrNotFound
+	}
+	if slices.Contains(r.AllowedActions(viewer), action) {
+		return nil
+	}
+
+	isOwner := r.UserID == viewer.ID
+	switch action {
+	case ReportActionEdit, ReportActionDelete, ReportActionSubmit:
+		if !isOwner {
+			return ErrForbidden
+		}
+		if action == ReportActionSubmit && r.Status.Editable() && viewer.ApproverID == nil {
+			return ErrNoApprover
+		}
+	case ReportActionApprove, ReportActionReject:
+		if r.ApproverID == nil || *r.ApproverID != viewer.ID {
+			return ErrForbidden
+		}
+	case ReportActionPay:
+		if viewer.Role != RoleAccounting {
+			return ErrForbidden
+		}
+	}
+	return ErrInvalidStatus
+}
+
 // ReportSummary は一覧に出す申請の要約を表す。合計と件数は明細から集計した値。
 type ReportSummary struct {
 	ID          int64
@@ -157,6 +192,9 @@ type ApprovalLog struct {
 var (
 	ErrInvalidCategory = errors.New("invalid category")
 	ErrInvalidInput    = errors.New("invalid input")
+	ErrForbidden       = errors.New("forbidden")                // 見られるが、その操作の担当ではない
+	ErrInvalidStatus   = errors.New("invalid report status")    // いまの状態ではその操作ができない（同時操作も含む）
+	ErrNoApprover      = errors.New("approver is not assigned") // 承認者が決まっていないので申請できない
 )
 
 // ValidationError は入力不正の理由を持つエラー。Message はそのまま画面に出せる文言にする。

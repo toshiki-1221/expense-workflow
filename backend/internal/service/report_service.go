@@ -20,6 +20,7 @@ type reportRepository interface {
 	CreateReport(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*domain.Report, error)
 	ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error)
 	GetReport(ctx context.Context, id int64) (*domain.Report, error)
+	SubmitReport(ctx context.Context, reportID, userID int64) error
 }
 
 // userFinder はログイン中のユーザー（ロール・承認者）を取得する振る舞いを定義する。
@@ -63,23 +64,53 @@ func (s *ReportService) CreateDraft(ctx context.Context, userID int64, title str
 // GetDetail は申請の詳細を取得する。
 // 見る権限がない申請は、存在を隠すため domain.ErrNotFound を返す（403 ではなく 404）。
 func (s *ReportService) GetDetail(ctx context.Context, userID, reportID int64) (*ReportDetail, error) {
-	viewer, err := s.users.FindByID(ctx, userID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil, domain.ErrUnauthorized // トークンは正しいがユーザーが消えている
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	report, err := s.repository.GetReport(ctx, reportID)
+	viewer, report, err := s.load(ctx, userID, reportID)
 	if err != nil {
 		return nil, err
 	}
 	if !report.CanBeViewedBy(viewer) {
 		return nil, domain.ErrNotFound
 	}
-
 	return &ReportDetail{Report: report, AllowedActions: report.AllowedActions(viewer)}, nil
+}
+
+// Submit は申請を提出し（draft / rejected → submitted）、提出後の詳細を返す。
+// 押せるかどうかは詳細の allowed_actions と同じ関数（CheckAction）で判定する。
+func (s *ReportService) Submit(ctx context.Context, userID, reportID int64) (*ReportDetail, error) {
+	viewer, report, err := s.load(ctx, userID, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if err := report.CheckAction(viewer, domain.ReportActionSubmit); err != nil {
+		return nil, err
+	}
+	// 下書きは明細0件でもよいが、申請するときは1件以上必須
+	if len(report.Items) == 0 {
+		return nil, &domain.ValidationError{Message: "明細を1件以上追加してから申請してください"}
+	}
+
+	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
+	if err := s.repository.SubmitReport(ctx, reportID, userID); err != nil {
+		return nil, err
+	}
+	return s.GetDetail(ctx, userID, reportID)
+}
+
+// load はログイン中のユーザーと申請（明細・履歴つき）を取得する。
+func (s *ReportService) load(ctx context.Context, userID, reportID int64) (*domain.User, *domain.Report, error) {
+	viewer, err := s.users.FindByID(ctx, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil, domain.ErrUnauthorized // トークンは正しいがユーザーが消えている
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	report, err := s.repository.GetReport(ctx, reportID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return viewer, report, nil
 }
 
 // ListMine は自分の申請一覧を取得する。status が空なら全ステータス。

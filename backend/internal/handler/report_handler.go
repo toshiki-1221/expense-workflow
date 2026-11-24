@@ -25,6 +25,7 @@ type reportService interface {
 	CreateDraft(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 	ListMine(ctx context.Context, userID int64, status string) ([]domain.ReportSummary, error)
 	GetDetail(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
+	Submit(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 }
 
 // ReportHandler は経費申請APIのHTTP処理を担当する。
@@ -271,31 +272,70 @@ func (h *ReportHandler) List(c *gin.Context) {
 // 他人の申請や存在しないIDは、区別せず 404 にする。
 // GET /api/v1/reports/:id
 func (h *ReportHandler) Get(c *gin.Context) {
-	userID, ok := middleware.UserID(c)
+	userID, reportID, ok := userAndReportID(c)
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
-		return
-	}
-
-	reportID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || reportID <= 0 {
-		response.Error(c, http.StatusNotFound, response.CodeNotFound, "申請が見つかりません")
 		return
 	}
 
 	detail, err := h.service.GetDetail(c.Request.Context(), userID, reportID)
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		response.Error(c, http.StatusNotFound, response.CodeNotFound, "申請が見つかりません")
+	if err != nil {
+		writeReportError(c, err, "get report")
 		return
-	case errors.Is(err, domain.ErrUnauthorized):
-		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
-		return
-	case err != nil:
-		log.Printf("get report failed: %v", err)
-		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "internal server error")
+	}
+	c.JSON(http.StatusOK, toReportResponse(detail))
+}
+
+// Submit は申請を提出する（draft / rejected → submitted）。ボディは不要。
+// POST /api/v1/reports/:id/submit
+func (h *ReportHandler) Submit(c *gin.Context) {
+	userID, reportID, ok := userAndReportID(c)
+	if !ok {
 		return
 	}
 
+	detail, err := h.service.Submit(c.Request.Context(), userID, reportID)
+	if err != nil {
+		writeReportError(c, err, "submit report")
+		return
+	}
 	c.JSON(http.StatusOK, toReportResponse(detail))
+}
+
+// userAndReportID はログイン中のユーザーIDと、パスの :id を取り出す。
+// 取り出せないときはエラーレスポンスを書いて ok=false を返す。
+func userAndReportID(c *gin.Context) (userID, reportID int64, ok bool) {
+	userID, ok = middleware.UserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
+		return 0, 0, false
+	}
+	reportID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || reportID <= 0 {
+		// 数字でない id も「その申請はない」として扱う
+		response.Error(c, http.StatusNotFound, response.CodeNotFound, "申請が見つかりません")
+		return 0, 0, false
+	}
+	return userID, reportID, true
+}
+
+// writeReportError は申請APIの業務エラーをHTTPステータスに変換して返す。
+func writeReportError(c *gin.Context, err error, op string) {
+	var verr *domain.ValidationError
+	switch {
+	case errors.As(err, &verr):
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, verr.Message)
+	case errors.Is(err, domain.ErrNotFound):
+		response.Error(c, http.StatusNotFound, response.CodeNotFound, "申請が見つかりません")
+	case errors.Is(err, domain.ErrUnauthorized):
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
+	case errors.Is(err, domain.ErrForbidden):
+		response.Error(c, http.StatusForbidden, response.CodeForbidden, "この操作をする権限がありません")
+	case errors.Is(err, domain.ErrNoApprover):
+		response.Error(c, http.StatusConflict, response.CodeConflict, "承認者が設定されていないため申請できません。管理者に連絡してください")
+	case errors.Is(err, domain.ErrInvalidStatus):
+		response.Error(c, http.StatusConflict, response.CodeConflict, "この申請はいまの状態では操作できません。画面を再読み込みしてください")
+	default:
+		log.Printf("%s failed: %v", op, err)
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "internal server error")
+	}
 }

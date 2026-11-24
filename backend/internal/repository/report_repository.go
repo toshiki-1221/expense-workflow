@@ -144,6 +144,24 @@ func (r *ReportRepository) GetReport(ctx context.Context, id int64) (*domain.Rep
 	return report, nil
 }
 
+// SubmitReport は申請を「申請中」にし、履歴を1行追加する。
+// SQL 1本（条件付きUPDATE + INSERT）なので、それだけで1トランザクションになる。
+// 申請者の承認者を申請にコピーする（あとで上長が変わってもぶれない）。
+// 条件（本人・draft か rejected・承認者がいる）に合わず更新が0行のときは domain.ErrInvalidStatus を返す。
+func (r *ReportRepository) SubmitReport(ctx context.Context, reportID, userID int64) error {
+	_, err := r.queries.SubmitExpenseReport(ctx, db.SubmitExpenseReportParams{
+		ReportID: reportID,
+		UserID:   userID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrInvalidStatus // 直前に別の操作で状態が変わった
+	}
+	if err != nil {
+		return fmt.Errorf("submit expense report: %w", err)
+	}
+	return nil
+}
+
 // ListReports は自分の申請一覧を新しい順に取得する。status が nil なら全ステータス。
 func (r *ReportRepository) ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error) {
 	var statusArg *string

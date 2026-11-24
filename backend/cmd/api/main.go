@@ -76,6 +76,7 @@ func run() error {
 	authed.GET("/reports", reportHandler.List)
 	authed.POST("/reports", reportHandler.Create)
 	authed.GET("/reports/:id", reportHandler.Get)
+	authed.POST("/reports/:id/submit", reportHandler.Submit)
 	// 経理APIを作るとき:
 	// accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))
 
