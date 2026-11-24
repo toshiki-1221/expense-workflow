@@ -1,9 +1,22 @@
 -- name: ListMyExpenseReports :many
-SELECT id, user_id, approver_id, title, status, submitted_at, created_at, updated_at
-FROM expense_reports
-WHERE user_id = sqlc.arg(user_id)
-  AND (sqlc.narg(status)::varchar IS NULL OR status = sqlc.narg(status)::varchar)
-ORDER BY created_at DESC, id DESC;
+-- 合計金額と明細件数は持たずに明細から集計する（明細0件の申請も出すので LEFT JOIN）
+SELECT
+    er.id,
+    er.user_id,
+    er.approver_id,
+    er.title,
+    er.status,
+    er.submitted_at,
+    er.created_at,
+    er.updated_at,
+    COALESCE(SUM(ei.amount), 0)::bigint AS total_amount,
+    COUNT(ei.id)::bigint AS item_count
+FROM expense_reports er
+LEFT JOIN expense_items ei ON ei.report_id = er.id
+WHERE er.user_id = sqlc.arg(user_id)
+  AND (sqlc.narg(status)::varchar IS NULL OR er.status = sqlc.narg(status)::varchar)
+GROUP BY er.id
+ORDER BY er.created_at DESC, er.id DESC;
 
 -- name: CreateExpenseReport :one
 INSERT INTO expense_reports (user_id, title, status)

@@ -21,6 +21,7 @@ const dateLayout = "2006-01-02"
 // reportService は経費申請のユースケースを提供するServiceの振る舞いを定義する。
 type reportService interface {
 	CreateDraft(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*domain.Report, error)
+	ListMine(ctx context.Context, userID int64, status string) ([]domain.ReportSummary, error)
 }
 
 // ReportHandler は経費申請APIのHTTP処理を担当する。
@@ -100,6 +101,23 @@ func toReportResponse(r *domain.Report) reportResponse {
 	}
 }
 
+// reportSummaryResponse は一覧に出す申請1件分のレスポンス項目を表す。
+type reportSummaryResponse struct {
+	ID          int64      `json:"id"`
+	Title       string     `json:"title"`
+	Status      string     `json:"status"`
+	TotalAmount int64      `json:"total_amount"`
+	ItemCount   int64      `json:"item_count"`
+	SubmittedAt *time.Time `json:"submitted_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// listReportsResponse は申請一覧を {"reports": [...]} で包んだ形を表す（あとで pagination を足せる）。
+type listReportsResponse struct {
+	Reports []reportSummaryResponse `json:"reports"`
+}
+
 // toItemInputs はリクエストの明細をServiceへの入力に変換する。利用日の形式だけここで見る。
 func toItemInputs(reqs []reportItemRequest) ([]domain.ReportItemInput, error) {
 	items := make([]domain.ReportItemInput, 0, len(reqs))
@@ -159,4 +177,41 @@ func (h *ReportHandler) Create(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, toReportResponse(report))
+}
+
+// List は自分の申請一覧を返す。?status= でステータスを絞り込める。
+// GET /api/v1/reports
+func (h *ReportHandler) List(c *gin.Context) {
+	userID, ok := middleware.UserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
+		return
+	}
+
+	reports, err := h.service.ListMine(c.Request.Context(), userID, c.Query("status"))
+	var verr *domain.ValidationError
+	switch {
+	case errors.As(err, &verr):
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, verr.Message)
+		return
+	case err != nil:
+		log.Printf("list reports failed: %v", err)
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "internal server error")
+		return
+	}
+
+	items := make([]reportSummaryResponse, 0, len(reports))
+	for _, r := range reports {
+		items = append(items, reportSummaryResponse{
+			ID:          r.ID,
+			Title:       r.Title,
+			Status:      string(r.Status),
+			TotalAmount: r.TotalAmount,
+			ItemCount:   r.ItemCount,
+			SubmittedAt: r.SubmittedAt,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, listReportsResponse{Reports: items})
 }

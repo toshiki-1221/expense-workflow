@@ -17,6 +17,7 @@ const (
 // reportRepository は申請を保存・取得するRepositoryの振る舞いを定義する。
 type reportRepository interface {
 	CreateReport(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*domain.Report, error)
+	ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error)
 }
 
 // ReportService は経費申請のユースケースを提供する。
@@ -37,6 +38,19 @@ func (s *ReportService) CreateDraft(ctx context.Context, userID int64, title str
 		return nil, err
 	}
 	return s.repository.CreateReport(ctx, userID, title, items)
+}
+
+// ListMine は自分の申請一覧を取得する。status が空なら全ステータス。
+// 未定義のステータスが来たときは *domain.ValidationError を返す。
+func (s *ReportService) ListMine(ctx context.Context, userID int64, status string) ([]domain.ReportSummary, error) {
+	if status == "" {
+		return s.repository.ListReports(ctx, userID, nil)
+	}
+	st := domain.ReportStatus(status)
+	if !st.Valid() {
+		return nil, &domain.ValidationError{Message: "status は draft / submitted / approved / rejected / paid のどれかを指定してください"}
+	}
+	return s.repository.ListReports(ctx, userID, &st)
 }
 
 // validateDraft は件名と明細の必須・桁数をチェックする。

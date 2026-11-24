@@ -295,11 +295,23 @@ func (q *Queries) ListExpenseReportItems(ctx context.Context, reportID int64) ([
 }
 
 const listMyExpenseReports = `-- name: ListMyExpenseReports :many
-SELECT id, user_id, approver_id, title, status, submitted_at, created_at, updated_at
-FROM expense_reports
-WHERE user_id = $1
-  AND ($2::varchar IS NULL OR status = $2::varchar)
-ORDER BY created_at DESC, id DESC
+SELECT
+    er.id,
+    er.user_id,
+    er.approver_id,
+    er.title,
+    er.status,
+    er.submitted_at,
+    er.created_at,
+    er.updated_at,
+    COALESCE(SUM(ei.amount), 0)::bigint AS total_amount,
+    COUNT(ei.id)::bigint AS item_count
+FROM expense_reports er
+LEFT JOIN expense_items ei ON ei.report_id = er.id
+WHERE er.user_id = $1
+  AND ($2::varchar IS NULL OR er.status = $2::varchar)
+GROUP BY er.id
+ORDER BY er.created_at DESC, er.id DESC
 `
 
 type ListMyExpenseReportsParams struct {
@@ -307,15 +319,29 @@ type ListMyExpenseReportsParams struct {
 	Status *string
 }
 
-func (q *Queries) ListMyExpenseReports(ctx context.Context, arg ListMyExpenseReportsParams) ([]ExpenseReport, error) {
+type ListMyExpenseReportsRow struct {
+	ID          int64
+	UserID      int64
+	ApproverID  *int64
+	Title       string
+	Status      string
+	SubmittedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	TotalAmount int64
+	ItemCount   int64
+}
+
+// 合計金額と明細件数は持たずに明細から集計する（明細0件の申請も出すので LEFT JOIN）
+func (q *Queries) ListMyExpenseReports(ctx context.Context, arg ListMyExpenseReportsParams) ([]ListMyExpenseReportsRow, error) {
 	rows, err := q.db.Query(ctx, listMyExpenseReports, arg.UserID, arg.Status)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ExpenseReport{}
+	items := []ListMyExpenseReportsRow{}
 	for rows.Next() {
-		var i ExpenseReport
+		var i ListMyExpenseReportsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
@@ -325,6 +351,8 @@ func (q *Queries) ListMyExpenseReports(ctx context.Context, arg ListMyExpenseRep
 			&i.SubmittedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TotalAmount,
+			&i.ItemCount,
 		); err != nil {
 			return nil, err
 		}

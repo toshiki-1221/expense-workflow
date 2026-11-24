@@ -29,6 +29,27 @@ type Report struct {
 	Items       []ReportItem
 }
 
+// Valid は定義済みのステータスかどうかを返す。
+func (s ReportStatus) Valid() bool {
+	switch s {
+	case ReportStatusDraft, ReportStatusSubmitted, ReportStatusApproved, ReportStatusRejected, ReportStatusPaid:
+		return true
+	}
+	return false
+}
+
+// ReportSummary は一覧に出す申請の要約を表す。合計と件数は明細から集計した値。
+type ReportSummary struct {
+	ID          int64
+	Title       string
+	Status      ReportStatus
+	TotalAmount int64
+	ItemCount   int64
+	SubmittedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 // ReportItem は申請の明細を表す。
 type ReportItem struct {
 	ID          int64

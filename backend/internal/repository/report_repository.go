@@ -82,6 +82,38 @@ func (r *ReportRepository) CreateReport(ctx context.Context, userID int64, title
 	return report, nil
 }
 
+// ListReports は自分の申請一覧を新しい順に取得する。status が nil なら全ステータス。
+func (r *ReportRepository) ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error) {
+	var statusArg *string
+	if status != nil {
+		s := string(*status)
+		statusArg = &s
+	}
+
+	rows, err := r.queries.ListMyExpenseReports(ctx, db.ListMyExpenseReportsParams{
+		UserID: userID,
+		Status: statusArg,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list my expense reports: %w", err)
+	}
+
+	reports := make([]domain.ReportSummary, 0, len(rows))
+	for _, row := range rows {
+		reports = append(reports, domain.ReportSummary{
+			ID:          row.ID,
+			Title:       row.Title,
+			Status:      domain.ReportStatus(row.Status),
+			TotalAmount: row.TotalAmount,
+			ItemCount:   row.ItemCount,
+			SubmittedAt: row.SubmittedAt,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		})
+	}
+	return reports, nil
+}
+
 // toDomainReport はsqlcの申請行をドメインの申請に変換する（明細は含まない）。
 func toDomainReport(row db.ExpenseReport) *domain.Report {
 	return &domain.Report{
