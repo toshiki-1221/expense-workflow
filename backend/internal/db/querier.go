@@ -26,7 +26,9 @@ type Querier interface {
 	ListExpenseReportItems(ctx context.Context, reportID int64) ([]ListExpenseReportItemsRow, error)
 	// 合計金額と明細件数は持たずに明細から集計する（明細0件の申請も出すので LEFT JOIN）
 	ListMyExpenseReports(ctx context.Context, arg ListMyExpenseReportsParams) ([]ListMyExpenseReportsRow, error)
-	ListPendingApprovals(ctx context.Context, approverID *int64) ([]ListPendingApprovalsRow, error)
+	// 自分宛ての承認待ち。古い申請から処理してもらうので申請日時の古い順。
+	// 申請中は明細1件以上が保証されているが、自分の一覧と揃えて LEFT JOIN で集計する
+	ListPendingApprovals(ctx context.Context, approverID int64) ([]ListPendingApprovalsRow, error)
 	PayExpenseReport(ctx context.Context, arg PayExpenseReportParams) (PayExpenseReportRow, error)
 	RejectExpenseReport(ctx context.Context, arg RejectExpenseReportParams) (RejectExpenseReportRow, error)
 	SubmitExpenseReport(ctx context.Context, arg SubmitExpenseReportParams) (SubmitExpenseReportRow, error)

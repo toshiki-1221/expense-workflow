@@ -28,6 +28,7 @@ type reportService interface {
 	Submit(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 	Delete(ctx context.Context, userID, reportID int64) error
+	ListPendingApprovals(ctx context.Context, userID int64) ([]domain.ReportSummary, error)
 }
 
 // ReportHandler は経費申請APIのHTTP処理を担当する。
@@ -170,6 +171,24 @@ type listReportsResponse struct {
 	Reports []reportSummaryResponse `json:"reports"`
 }
 
+// approvalSummaryResponse は承認待ち一覧の1件分を表す。自分の一覧と違い、誰の申請かを付ける。
+type approvalSummaryResponse struct {
+	ID          int64          `json:"id"`
+	User        personResponse `json:"user"`
+	Title       string         `json:"title"`
+	Status      string         `json:"status"`
+	TotalAmount int64          `json:"total_amount"`
+	ItemCount   int64          `json:"item_count"`
+	SubmittedAt *time.Time     `json:"submitted_at"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+// listApprovalsResponse は承認待ち一覧を {"reports": [...]} で包んだ形を表す（自分の一覧と揃える）。
+type listApprovalsResponse struct {
+	Reports []approvalSummaryResponse `json:"reports"`
+}
+
 // toItemInputs はリクエストの明細をServiceへの入力に変換する。利用日の形式だけここで見る。
 func toItemInputs(reqs []reportItemRequest) ([]domain.ReportItemInput, error) {
 	items := make([]domain.ReportItemInput, 0, len(reqs))
@@ -270,6 +289,40 @@ func (h *ReportHandler) List(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, listReportsResponse{Reports: items})
+}
+
+// ListApprovals は自分宛ての承認待ち（申請中）を、申請日時の古い順に返す。
+// 承認者になっていない人は空の一覧になる。
+// GET /api/v1/approvals
+func (h *ReportHandler) ListApprovals(c *gin.Context) {
+	userID, ok := middleware.UserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
+		return
+	}
+
+	reports, err := h.service.ListPendingApprovals(c.Request.Context(), userID)
+	if err != nil {
+		log.Printf("list approvals failed: %v", err)
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "internal server error")
+		return
+	}
+
+	items := make([]approvalSummaryResponse, 0, len(reports))
+	for _, r := range reports {
+		items = append(items, approvalSummaryResponse{
+			ID:          r.ID,
+			User:        personResponse{ID: r.UserID, Name: r.UserName},
+			Title:       r.Title,
+			Status:      string(r.Status),
+			TotalAmount: r.TotalAmount,
+			ItemCount:   r.ItemCount,
+			SubmittedAt: r.SubmittedAt,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, listApprovalsResponse{Reports: items})
 }
 
 // Get は申請の詳細（明細・履歴・押せるボタン）を返す。

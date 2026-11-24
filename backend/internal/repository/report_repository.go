@@ -283,6 +283,32 @@ func (r *ReportRepository) ListReports(ctx context.Context, userID int64, status
 	for _, row := range rows {
 		reports = append(reports, domain.ReportSummary{
 			ID:          row.ID,
+			UserID:      row.UserID,
+			Title:       row.Title,
+			Status:      domain.ReportStatus(row.Status),
+			TotalAmount: row.TotalAmount,
+			ItemCount:   row.ItemCount,
+			SubmittedAt: row.SubmittedAt,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		})
+	}
+	return reports, nil
+}
+
+// ListPendingApprovals は自分（approverID）宛ての承認待ち（申請中）を、申請日時の古い順に取得する。
+func (r *ReportRepository) ListPendingApprovals(ctx context.Context, approverID int64) ([]domain.ReportSummary, error) {
+	rows, err := r.queries.ListPendingApprovals(ctx, approverID)
+	if err != nil {
+		return nil, fmt.Errorf("list pending approvals: %w", err)
+	}
+
+	reports := make([]domain.ReportSummary, 0, len(rows))
+	for _, row := range rows {
+		reports = append(reports, domain.ReportSummary{
+			ID:          row.ID,
+			UserID:      row.UserID,
+			UserName:    row.UserName,
 			Title:       row.Title,
 			Status:      domain.ReportStatus(row.Status),
 			TotalAmount: row.TotalAmount,

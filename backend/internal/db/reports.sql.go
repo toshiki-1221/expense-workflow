@@ -430,12 +430,23 @@ func (q *Queries) ListMyExpenseReports(ctx context.Context, arg ListMyExpenseRep
 }
 
 const listPendingApprovals = `-- name: ListPendingApprovals :many
-SELECT er.id, er.user_id, submitter.name AS user_name, er.approver_id,
-       er.title, er.status, er.submitted_at, er.created_at, er.updated_at
+SELECT
+    er.id,
+    er.user_id,
+    submitter.name AS user_name,
+    er.title,
+    er.status,
+    er.submitted_at,
+    er.created_at,
+    er.updated_at,
+    COALESCE(SUM(ei.amount), 0)::bigint AS total_amount,
+    COUNT(ei.id)::bigint AS item_count
 FROM expense_reports er
 JOIN users submitter ON submitter.id = er.user_id
-WHERE er.approver_id = $1
+LEFT JOIN expense_items ei ON ei.report_id = er.id
+WHERE er.approver_id = $1::bigint
   AND er.status = 'submitted'
+GROUP BY er.id, submitter.name
 ORDER BY er.submitted_at, er.id
 `
 
@@ -443,15 +454,18 @@ type ListPendingApprovalsRow struct {
 	ID          int64
 	UserID      int64
 	UserName    string
-	ApproverID  *int64
 	Title       string
 	Status      string
 	SubmittedAt *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	TotalAmount int64
+	ItemCount   int64
 }
 
-func (q *Queries) ListPendingApprovals(ctx context.Context, approverID *int64) ([]ListPendingApprovalsRow, error) {
+// 自分宛ての承認待ち。古い申請から処理してもらうので申請日時の古い順。
+// 申請中は明細1件以上が保証されているが、自分の一覧と揃えて LEFT JOIN で集計する
+func (q *Queries) ListPendingApprovals(ctx context.Context, approverID int64) ([]ListPendingApprovalsRow, error) {
 	rows, err := q.db.Query(ctx, listPendingApprovals, approverID)
 	if err != nil {
 		return nil, err
@@ -464,12 +478,13 @@ func (q *Queries) ListPendingApprovals(ctx context.Context, approverID *int64) (
 			&i.ID,
 			&i.UserID,
 			&i.UserName,
-			&i.ApproverID,
 			&i.Title,
 			&i.Status,
 			&i.SubmittedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TotalAmount,
+			&i.ItemCount,
 		); err != nil {
 			return nil, err
 		}

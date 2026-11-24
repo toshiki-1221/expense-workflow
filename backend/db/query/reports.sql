@@ -139,12 +139,25 @@ SELECT updated.id, updated.user_id, updated.approver_id, updated.title, updated.
 FROM updated;
 
 -- name: ListPendingApprovals :many
-SELECT er.id, er.user_id, submitter.name AS user_name, er.approver_id,
-       er.title, er.status, er.submitted_at, er.created_at, er.updated_at
+-- 自分宛ての承認待ち。古い申請から処理してもらうので申請日時の古い順。
+-- 申請中は明細1件以上が保証されているが、自分の一覧と揃えて LEFT JOIN で集計する
+SELECT
+    er.id,
+    er.user_id,
+    submitter.name AS user_name,
+    er.title,
+    er.status,
+    er.submitted_at,
+    er.created_at,
+    er.updated_at,
+    COALESCE(SUM(ei.amount), 0)::bigint AS total_amount,
+    COUNT(ei.id)::bigint AS item_count
 FROM expense_reports er
 JOIN users submitter ON submitter.id = er.user_id
-WHERE er.approver_id = sqlc.arg(approver_id)
+LEFT JOIN expense_items ei ON ei.report_id = er.id
+WHERE er.approver_id = sqlc.arg(approver_id)::bigint
   AND er.status = 'submitted'
+GROUP BY er.id, submitter.name
 ORDER BY er.submitted_at, er.id;
 
 -- name: ApproveExpenseReport :one

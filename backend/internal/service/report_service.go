@@ -23,6 +23,7 @@ type reportRepository interface {
 	SubmitReport(ctx context.Context, reportID, userID int64) error
 	UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error
 	DeleteReport(ctx context.Context, reportID, userID int64) error
+	ListPendingApprovals(ctx context.Context, approverID int64) ([]domain.ReportSummary, error)
 }
 
 // userFinder はログイン中のユーザー（ロール・承認者）を取得する振る舞いを定義する。
@@ -173,6 +174,12 @@ func (s *ReportService) ListMine(ctx context.Context, userID int64, status strin
 		return nil, &domain.ValidationError{Message: "status は draft / submitted / approved / rejected / paid のどれかを指定してください"}
 	}
 	return s.repository.ListReports(ctx, userID, &st)
+}
+
+// ListPendingApprovals は自分宛ての承認待ち一覧を取得する。
+// 誰でも呼べる。承認者になっていない人は空の一覧になる（ロールでは弾かない）。
+func (s *ReportService) ListPendingApprovals(ctx context.Context, userID int64) ([]domain.ReportSummary, error) {
+	return s.repository.ListPendingApprovals(ctx, userID)
 }
 
 // validateDraft は件名と明細の必須・桁数をチェックする。

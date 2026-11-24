@@ -146,6 +146,8 @@ func (r *Report) CheckAction(viewer *User, action ReportAction) error {
 // ReportSummary は一覧に出す申請の要約を表す。合計と件数は明細から集計した値。
 type ReportSummary struct {
 	ID          int64
+	UserID      int64
+	UserName    string // 承認待ち一覧のときだけ入る（自分の一覧では本人なので不要）
 	Title       string
 	Status      ReportStatus
 	TotalAmount int64
