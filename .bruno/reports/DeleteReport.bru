@@ -1,0 +1,30 @@
+meta {
+  name: DeleteReport
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/reports/{{reportId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("204 で本文なし", function () {
+    expect(res.status).to.equal(204);
+  });
+}
+
+docs {
+  CreateReport → DeleteReport の順に実行する（reportId は CreateReport で入る）。
+  明細も一緒に消える（ON DELETE CASCADE）。
+
+  - draft のときだけ。申請中・差し戻しなど一度でも申請したものは 409（履歴が残っているので消さない）
+  - 他人の申請・もう消した申請 → 404
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

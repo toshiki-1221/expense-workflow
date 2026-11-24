@@ -27,6 +27,7 @@ type reportService interface {
 	GetDetail(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Submit(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
+	Delete(ctx context.Context, userID, reportID int64) error
 }
 
 // ReportHandler は経費申請APIのHTTP処理を担当する。
@@ -314,6 +315,21 @@ func (h *ReportHandler) Update(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, toReportResponse(detail))
+}
+
+// Delete は下書きの申請を明細ごと削除する（draft のみ）。成功したら 204 で本文なし。
+// DELETE /api/v1/reports/:id
+func (h *ReportHandler) Delete(c *gin.Context) {
+	userID, reportID, ok := userAndReportID(c)
+	if !ok {
+		return
+	}
+
+	if err := h.service.Delete(c.Request.Context(), userID, reportID); err != nil {
+		writeReportError(c, err, "delete report")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Submit は申請を提出する（draft / rejected → submitted）。ボディは不要。

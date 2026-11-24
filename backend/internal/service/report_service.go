@@ -22,6 +22,7 @@ type reportRepository interface {
 	GetReport(ctx context.Context, id int64) (*domain.Report, error)
 	SubmitReport(ctx context.Context, reportID, userID int64) error
 	UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error
+	DeleteReport(ctx context.Context, reportID, userID int64) error
 }
 
 // userFinder はログイン中のユーザー（ロール・承認者）を取得する振る舞いを定義する。
@@ -128,6 +129,20 @@ func (s *ReportService) Update(ctx context.Context, userID, reportID int64, titl
 		return nil, err
 	}
 	return s.GetDetail(ctx, userID, reportID)
+}
+
+// Delete は下書きの申請を明細ごと削除する（draft のみ）。
+// 一度でも申請した（差し戻しを含む）ものは履歴が残っているので消せない。
+func (s *ReportService) Delete(ctx context.Context, userID, reportID int64) error {
+	viewer, report, err := s.load(ctx, userID, reportID)
+	if err != nil {
+		return err
+	}
+	if err := report.CheckAction(viewer, domain.ReportActionDelete); err != nil {
+		return err
+	}
+	// 上のチェックのあとに申請されていても、SQL の条件付きDELETEで弾かれる
+	return s.repository.DeleteReport(ctx, reportID, userID)
 }
 
 // load はログイン中のユーザーと申請（明細・履歴つき）を取得する。

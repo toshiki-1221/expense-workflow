@@ -157,6 +157,23 @@ func (r *ReportRepository) UpdateReport(ctx context.Context, reportID, userID in
 	return nil
 }
 
+// DeleteReport は下書きの申請を削除する。明細は外部キーの ON DELETE CASCADE で一緒に消える。
+// SQL 1本の条件付きDELETE（本人・draft のときだけ）なので、それだけで1トランザクションになる。
+// 削除が0行のとき（直前に申請された・消されたなど）は domain.ErrInvalidStatus を返す。
+func (r *ReportRepository) DeleteReport(ctx context.Context, reportID, userID int64) error {
+	n, err := r.queries.DeleteDraftExpenseReport(ctx, db.DeleteDraftExpenseReportParams{
+		ID:     reportID,
+		UserID: userID,
+	})
+	if err != nil {
+		return fmt.Errorf("delete draft expense report: %w", err)
+	}
+	if n == 0 {
+		return domain.ErrInvalidStatus
+	}
+	return nil
+}
+
 // itemWriteError は明細の保存エラーを変換する。存在しない category_id なら domain.ErrInvalidCategory にする。
 func itemWriteError(op string, err error) error {
 	var pgErr *pgconn.PgError
