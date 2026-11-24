@@ -16,11 +16,13 @@ type Querier interface {
 	DeleteDraftExpenseReport(ctx context.Context, arg DeleteDraftExpenseReportParams) (int64, error)
 	DeleteExpenseItem(ctx context.Context, arg DeleteExpenseItemParams) (int64, error)
 	GetExpenseReport(ctx context.Context, arg GetExpenseReportParams) (ExpenseReport, error)
+	// 詳細画面用。申請者本人以外（承認者・経理）も見るので user_id では絞らず、見てよいかは Service で判定する
+	GetExpenseReportDetail(ctx context.Context, id int64) (GetExpenseReportDetailRow, error)
 	GetMe(ctx context.Context, id int64) (GetMeRow, error)
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	ListAccountingExpenseReports(ctx context.Context, arg ListAccountingExpenseReportsParams) ([]ListAccountingExpenseReportsRow, error)
 	ListExpenseCategories(ctx context.Context) ([]ExpenseCategory, error)
-	ListExpenseReportApprovalLogs(ctx context.Context, reportID int64) ([]ApprovalLog, error)
+	ListExpenseReportApprovalLogs(ctx context.Context, reportID int64) ([]ListExpenseReportApprovalLogsRow, error)
 	ListExpenseReportItems(ctx context.Context, reportID int64) ([]ListExpenseReportItemsRow, error)
 	// 合計金額と明細件数は持たずに明細から集計する（明細0件の申請も出すので LEFT JOIN）
 	ListMyExpenseReports(ctx context.Context, arg ListMyExpenseReportsParams) ([]ListMyExpenseReportsRow, error)

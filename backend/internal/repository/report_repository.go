@@ -82,6 +82,68 @@ func (r *ReportRepository) CreateReport(ctx context.Context, userID int64, title
 	return report, nil
 }
 
+// GetReport は申請を明細・履歴つきで取得する。誰が見てよいかはここでは判定しない（Service の担当）。
+// 申請がないときは domain.ErrNotFound を返す。
+func (r *ReportRepository) GetReport(ctx context.Context, id int64) (*domain.Report, error) {
+	row, err := r.queries.GetExpenseReportDetail(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get expense report detail: %w", err)
+	}
+
+	itemRows, err := r.queries.ListExpenseReportItems(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list expense report items: %w", err)
+	}
+	logRows, err := r.queries.ListExpenseReportApprovalLogs(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list expense report approval logs: %w", err)
+	}
+
+	report := &domain.Report{
+		ID:           row.ID,
+		UserID:       row.UserID,
+		UserName:     row.UserName,
+		ApproverID:   row.ApproverID,
+		ApproverName: row.ApproverName,
+		Title:        row.Title,
+		Status:       domain.ReportStatus(row.Status),
+		SubmittedAt:  row.SubmittedAt,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		Items:        make([]domain.ReportItem, 0, len(itemRows)),
+		Logs:         make([]domain.ApprovalLog, 0, len(logRows)),
+	}
+	for _, it := range itemRows {
+		report.Items = append(report.Items, domain.ReportItem{
+			ID:           it.ID,
+			ReportID:     it.ReportID,
+			CategoryID:   it.CategoryID,
+			CategoryName: it.CategoryName,
+			UsedOn:       it.UsedOn,
+			Amount:       it.Amount,
+			Description:  it.Description,
+			CreatedAt:    it.CreatedAt,
+			UpdatedAt:    it.UpdatedAt,
+		})
+	}
+	for _, l := range logRows {
+		report.Logs = append(report.Logs, domain.ApprovalLog{
+			ID:         l.ID,
+			ActorID:    l.ActorID,
+			ActorName:  l.ActorName,
+			Action:     domain.ReportAction(l.Action),
+			FromStatus: domain.ReportStatus(l.FromStatus),
+			ToStatus:   domain.ReportStatus(l.ToStatus),
+			Comment:    l.Comment,
+			CreatedAt:  l.CreatedAt,
+		})
+	}
+	return report, nil
+}
+
 // ListReports は自分の申請一覧を新しい順に取得する。status が nil なら全ステータス。
 func (r *ReportRepository) ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error) {
 	var statusArg *string

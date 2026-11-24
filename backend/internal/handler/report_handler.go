@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"github.com/toshiki-1221/expense-workflow/internal/domain"
 	"github.com/toshiki-1221/expense-workflow/internal/handler/response"
 	"github.com/toshiki-1221/expense-workflow/internal/middleware"
+	"github.com/toshiki-1221/expense-workflow/internal/service"
 )
 
 // dateLayout はAPIで日付を受け渡す形式（例: 2026-11-03）。
@@ -20,8 +22,9 @@ const dateLayout = "2006-01-02"
 
 // reportService は経費申請のユースケースを提供するServiceの振る舞いを定義する。
 type reportService interface {
-	CreateDraft(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*domain.Report, error)
+	CreateDraft(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 	ListMine(ctx context.Context, userID int64, status string) ([]domain.ReportSummary, error)
+	GetDetail(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 }
 
 // ReportHandler は経費申請APIのHTTP処理を担当する。
@@ -50,54 +53,99 @@ type createReportRequest struct {
 	Items []reportItemRequest `json:"items"`
 }
 
+// personResponse は申請者・承認者・操作者を {id, name} で表す。
+type personResponse struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 // reportItemResponse は明細のレスポンス項目を表す。
 type reportItemResponse struct {
-	ID          int64  `json:"id"`
-	CategoryID  int64  `json:"category_id"`
-	UsedOn      string `json:"used_on"`
-	Amount      int64  `json:"amount"`
-	Description string `json:"description"`
+	ID           int64  `json:"id"`
+	CategoryID   int64  `json:"category_id"`
+	CategoryName string `json:"category_name"`
+	UsedOn       string `json:"used_on"`
+	Amount       int64  `json:"amount"`
+	Description  string `json:"description"`
 }
 
-// reportResponse は申請（明細つき）のレスポンスを表す。
+// approvalLogResponse は履歴1件分のレスポンス項目を表す。
+type approvalLogResponse struct {
+	Actor      personResponse `json:"actor"`
+	Action     string         `json:"action"`
+	FromStatus string         `json:"from_status"`
+	ToStatus   string         `json:"to_status"`
+	Comment    *string        `json:"comment"`
+	CreatedAt  time.Time      `json:"created_at"`
+}
+
+// reportResponse は申請詳細のレスポンスを表す。作成APIも同じ形で返す。
 type reportResponse struct {
-	ID          int64                `json:"id"`
-	UserID      int64                `json:"user_id"`
-	ApproverID  *int64               `json:"approver_id"`
-	Title       string               `json:"title"`
-	Status      string               `json:"status"`
-	SubmittedAt *time.Time           `json:"submitted_at"`
-	TotalAmount int64                `json:"total_amount"`
-	Items       []reportItemResponse `json:"items"`
-	CreatedAt   time.Time            `json:"created_at"`
-	UpdatedAt   time.Time            `json:"updated_at"`
+	ID             int64                 `json:"id"`
+	User           personResponse        `json:"user"`
+	Approver       *personResponse       `json:"approver"` // 下書き中は null
+	Title          string                `json:"title"`
+	Status         string                `json:"status"`
+	SubmittedAt    *time.Time            `json:"submitted_at"`
+	TotalAmount    int64                 `json:"total_amount"`
+	Items          []reportItemResponse  `json:"items"`
+	Logs           []approvalLogResponse `json:"logs"`
+	AllowedActions []string              `json:"allowed_actions"` // ログイン中の人が押せるボタン
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
 }
 
-// toReportResponse はドメインの申請をレスポンス形式に変換する。合計は明細から計算する。
-func toReportResponse(r *domain.Report) reportResponse {
+// toReportResponse は申請詳細をレスポンス形式に変換する。
+func toReportResponse(d *service.ReportDetail) reportResponse {
+	r := d.Report
+
 	items := make([]reportItemResponse, 0, len(r.Items))
-	var total int64
 	for _, it := range r.Items {
-		total += it.Amount
 		items = append(items, reportItemResponse{
-			ID:          it.ID,
-			CategoryID:  it.CategoryID,
-			UsedOn:      it.UsedOn.Format(dateLayout),
-			Amount:      it.Amount,
-			Description: it.Description,
+			ID:           it.ID,
+			CategoryID:   it.CategoryID,
+			CategoryName: it.CategoryName,
+			UsedOn:       it.UsedOn.Format(dateLayout),
+			Amount:       it.Amount,
+			Description:  it.Description,
 		})
 	}
+
+	logs := make([]approvalLogResponse, 0, len(r.Logs))
+	for _, l := range r.Logs {
+		logs = append(logs, approvalLogResponse{
+			Actor:      personResponse{ID: l.ActorID, Name: l.ActorName},
+			Action:     string(l.Action),
+			FromStatus: string(l.FromStatus),
+			ToStatus:   string(l.ToStatus),
+			Comment:    l.Comment,
+			CreatedAt:  l.CreatedAt,
+		})
+	}
+
+	var approver *personResponse
+	if r.ApproverID != nil && r.ApproverName != nil {
+		approver = &personResponse{ID: *r.ApproverID, Name: *r.ApproverName}
+	}
+
+	actions := make([]string, 0, len(d.AllowedActions))
+	for _, a := range d.AllowedActions {
+		actions = append(actions, string(a))
+	}
+
 	return reportResponse{
-		ID:          r.ID,
-		UserID:      r.UserID,
-		ApproverID:  r.ApproverID,
-		Title:       r.Title,
-		Status:      string(r.Status),
-		SubmittedAt: r.SubmittedAt,
-		TotalAmount: total,
-		Items:       items,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
+		ID:             r.ID,
+		User:           personResponse{ID: r.UserID, Name: r.UserName},
+		Approver:       approver,
+		Title:          r.Title,
+		Status:         string(r.Status),
+		SubmittedAt:    r.SubmittedAt,
+		TotalAmount:    r.TotalAmount(),
+		Items:          items,
+		Logs:           logs,
+		AllowedActions: actions,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
 	}
 }
 
@@ -170,6 +218,9 @@ func (h *ReportHandler) Create(c *gin.Context) {
 	case errors.Is(err, domain.ErrInvalidCategory):
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "存在しない科目が指定されています")
 		return
+	case errors.Is(err, domain.ErrUnauthorized):
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
+		return
 	case err != nil:
 		log.Printf("create report failed: %v", err)
 		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "internal server error")
@@ -214,4 +265,37 @@ func (h *ReportHandler) List(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, listReportsResponse{Reports: items})
+}
+
+// Get は申請の詳細（明細・履歴・押せるボタン）を返す。
+// 他人の申請や存在しないIDは、区別せず 404 にする。
+// GET /api/v1/reports/:id
+func (h *ReportHandler) Get(c *gin.Context) {
+	userID, ok := middleware.UserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
+		return
+	}
+
+	reportID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || reportID <= 0 {
+		response.Error(c, http.StatusNotFound, response.CodeNotFound, "申請が見つかりません")
+		return
+	}
+
+	detail, err := h.service.GetDetail(c.Request.Context(), userID, reportID)
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		response.Error(c, http.StatusNotFound, response.CodeNotFound, "申請が見つかりません")
+		return
+	case errors.Is(err, domain.ErrUnauthorized):
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "ログインしてください")
+		return
+	case err != nil:
+		log.Printf("get report failed: %v", err)
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "internal server error")
+		return
+	}
+
+	c.JSON(http.StatusOK, toReportResponse(detail))
 }

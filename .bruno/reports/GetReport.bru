@@ -1,0 +1,31 @@
+meta {
+  name: GetReport
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/reports/{{reportId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("200 で明細・履歴・押せるボタンが返る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.user).to.have.property("name");
+    expect(res.body.items).to.be.an("array");
+    expect(res.body.logs).to.be.an("array");
+    expect(res.body.allowed_actions).to.be.an("array");
+  });
+}
+
+docs {
+  reportId は CreateReport を実行すると自動で入る。
+  他人の申請・存在しない id は 404（存在を隠すため 403 にしない）。
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -28,6 +28,24 @@ SELECT id, user_id, approver_id, title, status, submitted_at, created_at, update
 FROM expense_reports
 WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id);
 
+-- name: GetExpenseReportDetail :one
+-- 詳細画面用。申請者本人以外（承認者・経理）も見るので user_id では絞らず、見てよいかは Service で判定する
+SELECT
+    er.id,
+    er.user_id,
+    submitter.name AS user_name,
+    er.approver_id,
+    approver.name AS approver_name,
+    er.title,
+    er.status,
+    er.submitted_at,
+    er.created_at,
+    er.updated_at
+FROM expense_reports er
+JOIN users submitter ON submitter.id = er.user_id
+LEFT JOIN users approver ON approver.id = er.approver_id
+WHERE er.id = sqlc.arg(id);
+
 -- name: ListExpenseReportItems :many
 SELECT
     ei.id,
@@ -177,7 +195,9 @@ WITH updated AS (
 SELECT * FROM updated;
 
 -- name: ListExpenseReportApprovalLogs :many
-SELECT id, report_id, actor_id, action, from_status, to_status, comment, created_at
-FROM approval_logs
-WHERE report_id = sqlc.arg(report_id)
-ORDER BY created_at, id;
+SELECT al.id, al.report_id, al.actor_id, actor.name AS actor_name,
+       al.action, al.from_status, al.to_status, al.comment, al.created_at
+FROM approval_logs al
+JOIN users actor ON actor.id = al.actor_id
+WHERE al.report_id = sqlc.arg(report_id)
+ORDER BY al.created_at, al.id;

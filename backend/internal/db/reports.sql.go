@@ -199,26 +199,91 @@ func (q *Queries) GetExpenseReport(ctx context.Context, arg GetExpenseReportPara
 	return i, err
 }
 
-const listExpenseReportApprovalLogs = `-- name: ListExpenseReportApprovalLogs :many
-SELECT id, report_id, actor_id, action, from_status, to_status, comment, created_at
-FROM approval_logs
-WHERE report_id = $1
-ORDER BY created_at, id
+const getExpenseReportDetail = `-- name: GetExpenseReportDetail :one
+SELECT
+    er.id,
+    er.user_id,
+    submitter.name AS user_name,
+    er.approver_id,
+    approver.name AS approver_name,
+    er.title,
+    er.status,
+    er.submitted_at,
+    er.created_at,
+    er.updated_at
+FROM expense_reports er
+JOIN users submitter ON submitter.id = er.user_id
+LEFT JOIN users approver ON approver.id = er.approver_id
+WHERE er.id = $1
 `
 
-func (q *Queries) ListExpenseReportApprovalLogs(ctx context.Context, reportID int64) ([]ApprovalLog, error) {
+type GetExpenseReportDetailRow struct {
+	ID           int64
+	UserID       int64
+	UserName     string
+	ApproverID   *int64
+	ApproverName *string
+	Title        string
+	Status       string
+	SubmittedAt  *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// 詳細画面用。申請者本人以外（承認者・経理）も見るので user_id では絞らず、見てよいかは Service で判定する
+func (q *Queries) GetExpenseReportDetail(ctx context.Context, id int64) (GetExpenseReportDetailRow, error) {
+	row := q.db.QueryRow(ctx, getExpenseReportDetail, id)
+	var i GetExpenseReportDetailRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.UserName,
+		&i.ApproverID,
+		&i.ApproverName,
+		&i.Title,
+		&i.Status,
+		&i.SubmittedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listExpenseReportApprovalLogs = `-- name: ListExpenseReportApprovalLogs :many
+SELECT al.id, al.report_id, al.actor_id, actor.name AS actor_name,
+       al.action, al.from_status, al.to_status, al.comment, al.created_at
+FROM approval_logs al
+JOIN users actor ON actor.id = al.actor_id
+WHERE al.report_id = $1
+ORDER BY al.created_at, al.id
+`
+
+type ListExpenseReportApprovalLogsRow struct {
+	ID         int64
+	ReportID   int64
+	ActorID    int64
+	ActorName  string
+	Action     string
+	FromStatus string
+	ToStatus   string
+	Comment    *string
+	CreatedAt  time.Time
+}
+
+func (q *Queries) ListExpenseReportApprovalLogs(ctx context.Context, reportID int64) ([]ListExpenseReportApprovalLogsRow, error) {
 	rows, err := q.db.Query(ctx, listExpenseReportApprovalLogs, reportID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ApprovalLog{}
+	items := []ListExpenseReportApprovalLogsRow{}
 	for rows.Next() {
-		var i ApprovalLog
+		var i ListExpenseReportApprovalLogsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ReportID,
 			&i.ActorID,
+			&i.ActorName,
 			&i.Action,
 			&i.FromStatus,
 			&i.ToStatus,

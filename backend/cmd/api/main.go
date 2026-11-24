@@ -56,7 +56,7 @@ func run() error {
 
 	// 申請と明細をまとめて保存するので、トランザクション用に pool も渡す
 	reportRepository := repository.NewReportRepository(pool, queries)
-	reportService := service.NewReportService(reportRepository)
+	reportService := service.NewReportService(reportRepository, userRepository)
 	reportHandler := handler.NewReportHandler(reportService)
 
 	r := gin.Default()
@@ -75,6 +75,7 @@ func run() error {
 	authed.GET("/categories", categoryHandler.List)
 	authed.GET("/reports", reportHandler.List)
 	authed.POST("/reports", reportHandler.Create)
+	authed.GET("/reports/:id", reportHandler.Get)
 	// 経理APIを作るとき:
 	// accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))
 

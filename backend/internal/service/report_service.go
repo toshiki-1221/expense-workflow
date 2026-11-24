@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -18,26 +19,67 @@ const (
 type reportRepository interface {
 	CreateReport(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*domain.Report, error)
 	ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error)
+	GetReport(ctx context.Context, id int64) (*domain.Report, error)
+}
+
+// userFinder はログイン中のユーザー（ロール・承認者）を取得する振る舞いを定義する。
+type userFinder interface {
+	FindByID(ctx context.Context, id int64) (*domain.User, error)
 }
 
 // ReportService は経費申請のユースケースを提供する。
 type ReportService struct {
 	repository reportRepository
+	users      userFinder
 }
 
 // NewReportService は申請Serviceを作成する。
-func NewReportService(repository reportRepository) *ReportService {
-	return &ReportService{repository: repository}
+// 見てよいか・押せるボタンはロールで変わるので、ユーザーの取得元も受け取る。
+func NewReportService(repository reportRepository, users userFinder) *ReportService {
+	return &ReportService{repository: repository, users: users}
 }
 
-// CreateDraft は明細つきの下書きを作成する。明細は0件でもよい。
+// ReportDetail は申請の詳細と、閲覧者が押せるボタンの一覧を表す。
+type ReportDetail struct {
+	Report         *domain.Report
+	AllowedActions []domain.ReportAction
+}
+
+// CreateDraft は明細つきの下書きを作成し、詳細と同じ形で返す。明細は0件でもよい。
 // 入力が不正なときは *domain.ValidationError を返す。
-func (s *ReportService) CreateDraft(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*domain.Report, error) {
+func (s *ReportService) CreateDraft(ctx context.Context, userID int64, title string, items []domain.ReportItemInput) (*ReportDetail, error) {
 	title = strings.TrimSpace(title)
 	if err := validateDraft(title, items); err != nil {
 		return nil, err
 	}
-	return s.repository.CreateReport(ctx, userID, title, items)
+	created, err := s.repository.CreateReport(ctx, userID, title, items)
+	if err != nil {
+		return nil, err
+	}
+	// 科目名・申請者名・allowed_actions まで揃えるため、詳細を取り直す
+	return s.GetDetail(ctx, userID, created.ID)
+}
+
+// GetDetail は申請の詳細を取得する。
+// 見る権限がない申請は、存在を隠すため domain.ErrNotFound を返す（403 ではなく 404）。
+func (s *ReportService) GetDetail(ctx context.Context, userID, reportID int64) (*ReportDetail, error) {
+	viewer, err := s.users.FindByID(ctx, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, domain.ErrUnauthorized // トークンは正しいがユーザーが消えている
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	report, err := s.repository.GetReport(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if !report.CanBeViewedBy(viewer) {
+		return nil, domain.ErrNotFound
+	}
+
+	return &ReportDetail{Report: report, AllowedActions: report.AllowedActions(viewer)}, nil
 }
 
 // ListMine は自分の申請一覧を取得する。status が空なら全ステータス。
