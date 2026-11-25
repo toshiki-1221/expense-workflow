@@ -27,6 +27,7 @@ type reportService interface {
 	GetDetail(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Submit(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Approve(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
+	Reject(ctx context.Context, userID, reportID int64, comment string) (*service.ReportDetail, error)
 	Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 	Delete(ctx context.Context, userID, reportID int64) error
 	ListPendingApprovals(ctx context.Context, userID int64) ([]domain.ReportSummary, error)
@@ -413,6 +414,33 @@ func (h *ReportHandler) Approve(c *gin.Context) {
 	detail, err := h.service.Approve(c.Request.Context(), userID, reportID)
 	if err != nil {
 		writeReportError(c, err, "approve report")
+		return
+	}
+	c.JSON(http.StatusOK, toReportResponse(detail))
+}
+
+// rejectReportRequest は差し戻しAPIのリクエストボディを表す。必須チェックは Service で行う。
+type rejectReportRequest struct {
+	Comment string `json:"comment"`
+}
+
+// Reject は申請を差し戻す（submitted → rejected）。理由（comment）は必須。
+// POST /api/v1/reports/:id/reject
+func (h *ReportHandler) Reject(c *gin.Context) {
+	userID, reportID, ok := userAndReportID(c)
+	if !ok {
+		return
+	}
+
+	var req rejectReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "リクエストの形式が正しくありません")
+		return
+	}
+
+	detail, err := h.service.Reject(c.Request.Context(), userID, reportID, req.Comment)
+	if err != nil {
+		writeReportError(c, err, "reject report")
 		return
 	}
 	c.JSON(http.StatusOK, toReportResponse(detail))

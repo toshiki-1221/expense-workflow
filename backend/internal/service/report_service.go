@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	maxReportTitleLen     = 100 // expense_reports.title VARCHAR(100)
-	maxItemDescriptionLen = 255 // expense_items.description VARCHAR(255)
+	maxReportTitleLen     = 100  // expense_reports.title VARCHAR(100)
+	maxItemDescriptionLen = 255  // expense_items.description VARCHAR(255)
+	maxRejectCommentLen   = 1000 // approval_logs.comment は TEXT だが、画面で読める長さに抑える
 )
 
 // reportRepository は申請を保存・取得するRepositoryの振る舞いを定義する。
@@ -22,6 +23,7 @@ type reportRepository interface {
 	GetReport(ctx context.Context, id int64) (*domain.Report, error)
 	SubmitReport(ctx context.Context, reportID, userID int64) error
 	ApproveReport(ctx context.Context, reportID, approverID int64) error
+	RejectReport(ctx context.Context, reportID, approverID int64, comment string) error
 	UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error
 	DeleteReport(ctx context.Context, reportID, userID int64) error
 	ListPendingApprovals(ctx context.Context, approverID int64) ([]domain.ReportSummary, error)
@@ -118,6 +120,34 @@ func (s *ReportService) Approve(ctx context.Context, userID, reportID int64) (*R
 
 	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
 	if err := s.repository.ApproveReport(ctx, reportID, userID); err != nil {
+		return nil, err
+	}
+	return s.GetDetail(ctx, userID, reportID)
+}
+
+// Reject は申請を差し戻し（submitted → rejected）、差し戻し後の詳細を返す。
+// 何を直せばよいか申請者に伝えるため、理由（comment）は必須。
+// 差し戻された申請は、申請者が直して（Update）もう一度出す（Submit）。
+func (s *ReportService) Reject(ctx context.Context, userID, reportID int64, comment string) (*ReportDetail, error) {
+	viewer, report, err := s.load(ctx, userID, reportID)
+	if err != nil {
+		return nil, err
+	}
+	// 押せない人には、理由の入力ミスより先に 404 / 403 / 409 を返す
+	if err := report.CheckAction(viewer, domain.ReportActionReject); err != nil {
+		return nil, err
+	}
+
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
+		return nil, &domain.ValidationError{Message: "差し戻しの理由を入力してください"}
+	}
+	if utf8.RuneCountInString(comment) > maxRejectCommentLen {
+		return nil, &domain.ValidationError{Message: fmt.Sprintf("差し戻しの理由は%d文字以内で入力してください", maxRejectCommentLen)}
+	}
+
+	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
+	if err := s.repository.RejectReport(ctx, reportID, userID, comment); err != nil {
 		return nil, err
 	}
 	return s.GetDetail(ctx, userID, reportID)

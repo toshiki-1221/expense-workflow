@@ -1,0 +1,43 @@
+meta {
+  name: RejectReport
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/reports/{{reportId}}/reject
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "comment": "参加者の名前を内容に書いてください"
+  }
+}
+
+tests {
+  test("200 で差し戻しになり、理由つきの履歴が入る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("rejected");
+    var last = res.body.logs[res.body.logs.length - 1];
+    expect(last.action).to.equal("reject");
+    expect(last.comment).to.equal("参加者の名前を内容に書いてください");
+    expect(res.body.allowed_actions).to.deep.equal([]);
+  });
+}
+
+docs {
+  yamada で CreateReport → SubmitReport を実行したあと、
+  承認者の sato@example.com でログインし直してから実行する。
+
+  - comment は必須（空白だけも不可）、1000文字まで → 400
+  - この申請の承認者だけ。申請者本人・経理 → 403、無関係の人 → 404
+  - 申請中以外（もう承認済みなど） → 409
+  - 差し戻された申請は、申請者が UpdateReport で直して SubmitReport でもう一度出す
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

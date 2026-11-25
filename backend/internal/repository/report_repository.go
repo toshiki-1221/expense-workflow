@@ -280,6 +280,24 @@ func (r *ReportRepository) ApproveReport(ctx context.Context, reportID, approver
 	return nil
 }
 
+// RejectReport は申請を「差し戻し」にし、理由（comment）つきの履歴を1行追加する。
+// SQL 1本（条件付きUPDATE + INSERT）なので、それだけで1トランザクションになる。
+// 条件（この申請の承認者・申請中・理由が空でない）に合わず更新が0行のときは domain.ErrInvalidStatus を返す。
+func (r *ReportRepository) RejectReport(ctx context.Context, reportID, approverID int64, comment string) error {
+	_, err := r.queries.RejectExpenseReport(ctx, db.RejectExpenseReportParams{
+		ReportID: reportID,
+		ActorID:  approverID,
+		Comment:  comment,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrInvalidStatus // 直前に別の操作で状態が変わった（先に承認されたなど）
+	}
+	if err != nil {
+		return fmt.Errorf("reject expense report: %w", err)
+	}
+	return nil
+}
+
 // ListReports は自分の申請一覧を新しい順に取得する。status が nil なら全ステータス。
 func (r *ReportRepository) ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error) {
 	var statusArg *string

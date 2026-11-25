@@ -41,7 +41,6 @@ type ApproveExpenseReportRow struct {
 	UpdatedAt   time.Time
 }
 
-// この申請の承認者で、申請中のときだけ承認済みにし、履歴を1行追加する
 func (q *Queries) ApproveExpenseReport(ctx context.Context, arg ApproveExpenseReportParams) (ApproveExpenseReportRow, error) {
 	row := q.db.QueryRow(ctx, approveExpenseReport, arg.ReportID, arg.ActorID)
 	var i ApproveExpenseReportRow
@@ -553,20 +552,20 @@ WITH updated AS (
     UPDATE expense_reports er
     SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
     WHERE er.id = $1
-      AND er.approver_id = $2
+      AND er.approver_id = $2::bigint
       AND er.status = 'submitted'
       AND BTRIM($3::text) <> ''
     RETURNING er.id, er.user_id, er.approver_id, er.title, er.status, er.submitted_at, er.created_at, er.updated_at
 ), logged AS (
     INSERT INTO approval_logs (report_id, actor_id, action, from_status, to_status, comment)
-    SELECT updated.id, $2, 'reject', 'submitted', 'rejected', $3 FROM updated
+    SELECT updated.id, $2::bigint, 'reject', 'submitted', 'rejected', $3 FROM updated
 )
 SELECT id, user_id, approver_id, title, status, submitted_at, created_at, updated_at FROM updated
 `
 
 type RejectExpenseReportParams struct {
 	ReportID int64
-	ActorID  *int64
+	ActorID  int64
 	Comment  string
 }
 
@@ -581,6 +580,7 @@ type RejectExpenseReportRow struct {
 	UpdatedAt   time.Time
 }
 
+// この申請の承認者で、申請中のときだけ差し戻しにし、理由つきの履歴を1行追加する
 func (q *Queries) RejectExpenseReport(ctx context.Context, arg RejectExpenseReportParams) (RejectExpenseReportRow, error) {
 	row := q.db.QueryRow(ctx, rejectExpenseReport, arg.ReportID, arg.ActorID, arg.Comment)
 	var i RejectExpenseReportRow

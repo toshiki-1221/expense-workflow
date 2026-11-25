@@ -9,7 +9,6 @@ import (
 )
 
 type Querier interface {
-	// この申請の承認者で、申請中のときだけ承認済みにし、履歴を1行追加する
 	ApproveExpenseReport(ctx context.Context, arg ApproveExpenseReportParams) (ApproveExpenseReportRow, error)
 	CountAccountingExpenseReports(ctx context.Context, status *string) (int64, error)
 	CreateExpenseItem(ctx context.Context, arg CreateExpenseItemParams) (ExpenseItem, error)
@@ -31,6 +30,7 @@ type Querier interface {
 	// 申請中は明細1件以上が保証されているが、自分の一覧と揃えて LEFT JOIN で集計する
 	ListPendingApprovals(ctx context.Context, approverID int64) ([]ListPendingApprovalsRow, error)
 	PayExpenseReport(ctx context.Context, arg PayExpenseReportParams) (PayExpenseReportRow, error)
+	// この申請の承認者で、申請中のときだけ差し戻しにし、理由つきの履歴を1行追加する
 	RejectExpenseReport(ctx context.Context, arg RejectExpenseReportParams) (RejectExpenseReportRow, error)
 	SubmitExpenseReport(ctx context.Context, arg SubmitExpenseReportParams) (SubmitExpenseReportRow, error)
 	UpdateExpenseItem(ctx context.Context, arg UpdateExpenseItemParams) (int64, error)

@@ -175,17 +175,18 @@ WITH updated AS (
 SELECT * FROM updated;
 
 -- name: RejectExpenseReport :one
+-- この申請の承認者で、申請中のときだけ差し戻しにし、理由つきの履歴を1行追加する
 WITH updated AS (
     UPDATE expense_reports er
     SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
     WHERE er.id = sqlc.arg(report_id)
-      AND er.approver_id = sqlc.arg(actor_id)
+      AND er.approver_id = sqlc.arg(actor_id)::bigint
       AND er.status = 'submitted'
       AND BTRIM(sqlc.arg(comment)::text) <> ''
     RETURNING er.id, er.user_id, er.approver_id, er.title, er.status, er.submitted_at, er.created_at, er.updated_at
 ), logged AS (
     INSERT INTO approval_logs (report_id, actor_id, action, from_status, to_status, comment)
-    SELECT updated.id, sqlc.arg(actor_id), 'reject', 'submitted', 'rejected', sqlc.arg(comment) FROM updated
+    SELECT updated.id, sqlc.arg(actor_id)::bigint, 'reject', 'submitted', 'rejected', sqlc.arg(comment) FROM updated
 )
 SELECT * FROM updated;
 
