@@ -28,6 +28,7 @@ type reportService interface {
 	Submit(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Approve(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Reject(ctx context.Context, userID, reportID int64, comment string) (*service.ReportDetail, error)
+	Pay(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 	Delete(ctx context.Context, userID, reportID int64) error
 	ListPendingApprovals(ctx context.Context, userID int64) ([]domain.ReportSummary, error)
@@ -481,6 +482,22 @@ func (h *ReportHandler) Approve(c *gin.Context) {
 	detail, err := h.service.Approve(c.Request.Context(), userID, reportID)
 	if err != nil {
 		writeReportError(c, err, "approve report")
+		return
+	}
+	c.JSON(http.StatusOK, toReportResponse(detail))
+}
+
+// Pay は申請を支払済みにする（approved → paid）。経理だけ。ボディは不要。
+// POST /api/v1/reports/:id/pay
+func (h *ReportHandler) Pay(c *gin.Context) {
+	userID, reportID, ok := userAndReportID(c)
+	if !ok {
+		return
+	}
+
+	detail, err := h.service.Pay(c.Request.Context(), userID, reportID)
+	if err != nil {
+		writeReportError(c, err, "pay report")
 		return
 	}
 	c.JSON(http.StatusOK, toReportResponse(detail))

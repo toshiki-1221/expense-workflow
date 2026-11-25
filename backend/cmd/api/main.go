@@ -83,6 +83,8 @@ func run() error {
 	authed.GET("/approvals", reportHandler.ListApprovals)
 	authed.POST("/reports/:id/approve", reportHandler.Approve)
 	authed.POST("/reports/:id/reject", reportHandler.Reject)
+	// 経理だけが押せるが、404 / 403 / 409 の出し分けを他の操作と揃えるため CheckAction で判定する
+	authed.POST("/reports/:id/pay", reportHandler.Pay)
 
 	// ここから下は経理ロールだけ（ロールはトークンではなく毎回DBの最新値で判定する）
 	accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))

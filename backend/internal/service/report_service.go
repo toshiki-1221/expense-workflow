@@ -24,6 +24,7 @@ type reportRepository interface {
 	SubmitReport(ctx context.Context, reportID, userID int64) error
 	ApproveReport(ctx context.Context, reportID, approverID int64) error
 	RejectReport(ctx context.Context, reportID, approverID int64, comment string) error
+	PayReport(ctx context.Context, reportID, actorID int64) error
 	UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error
 	DeleteReport(ctx context.Context, reportID, userID int64) error
 	ListPendingApprovals(ctx context.Context, approverID int64) ([]domain.ReportSummary, error)
@@ -164,6 +165,24 @@ func (s *ReportService) Reject(ctx context.Context, userID, reportID int64, comm
 
 	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
 	if err := s.repository.RejectReport(ctx, reportID, userID, comment); err != nil {
+		return nil, err
+	}
+	return s.GetDetail(ctx, userID, reportID)
+}
+
+// Pay は申請を支払済みにし（approved → paid）、支払後の詳細を返す。経理だけが押せる。
+// ここで申請のワークフローは終わり（paid からはどの操作もできない）。
+func (s *ReportService) Pay(ctx context.Context, userID, reportID int64) (*ReportDetail, error) {
+	viewer, report, err := s.load(ctx, userID, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if err := report.CheckAction(viewer, domain.ReportActionPay); err != nil {
+		return nil, err
+	}
+
+	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
+	if err := s.repository.PayReport(ctx, reportID, userID); err != nil {
 		return nil, err
 	}
 	return s.GetDetail(ctx, userID, reportID)

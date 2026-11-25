@@ -298,6 +298,23 @@ func (r *ReportRepository) RejectReport(ctx context.Context, reportID, approverI
 	return nil
 }
 
+// PayReport は申請を「支払済み」にし、履歴を1行追加する。
+// SQL 1本（条件付きUPDATE + INSERT）なので、それだけで1トランザクションになる。
+// 条件（操作する人が経理・承認済み）に合わず更新が0行のときは domain.ErrInvalidStatus を返す。
+func (r *ReportRepository) PayReport(ctx context.Context, reportID, actorID int64) error {
+	_, err := r.queries.PayExpenseReport(ctx, db.PayExpenseReportParams{
+		ReportID: reportID,
+		ActorID:  actorID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrInvalidStatus // 直前に別の操作で状態が変わった（二重支払など）
+	}
+	if err != nil {
+		return fmt.Errorf("pay expense report: %w", err)
+	}
+	return nil
+}
+
 // ListReports は自分の申請一覧を新しい順に取得する。status が nil なら全ステータス。
 func (r *ReportRepository) ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error) {
 	var statusArg *string

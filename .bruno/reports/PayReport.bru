@@ -1,0 +1,33 @@
+meta {
+  name: PayReport
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/reports/{{reportId}}/pay
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("200 で支払済みになり、履歴に pay が入る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("paid");
+    expect(res.body.logs[res.body.logs.length - 1].action).to.equal("pay");
+    expect(res.body.allowed_actions).to.deep.equal([]);
+  });
+}
+
+docs {
+  申請 → 承認（sato）まで済ませたあと、経理の keiri@example.com でログインし直してから実行する。
+
+  - 経理だけ。申請者本人・承認者 → 403、無関係の人 → 404
+  - 承認済み以外（申請中・もう支払済みなど） → 409
+  - 支払済みでワークフローは終わり。以後どの操作もできない
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
