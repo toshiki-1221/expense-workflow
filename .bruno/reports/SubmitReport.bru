@@ -1,0 +1,36 @@
+meta {
+  name: SubmitReport
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/reports/{{reportId}}/submit
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("200 で申請中になり、承認者と履歴が入る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("submitted");
+    expect(res.body.approver).to.not.equal(null);
+    expect(res.body.submitted_at).to.be.a("string");
+    expect(res.body.logs[res.body.logs.length - 1].action).to.equal("submit");
+    expect(res.body.allowed_actions).to.deep.equal([]);
+  });
+}
+
+docs {
+  CreateReport → SubmitReport の順に実行する（reportId は CreateReport で入る）。
+  承認者がいる yamada@example.com でログインしておくこと（sato は承認者がいないので 409）。
+
+  - 明細0件 → 400
+  - もう申請済み → 409
+  - 他人の申請 → 404、見られるが本人ではない（承認者・経理） → 403
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

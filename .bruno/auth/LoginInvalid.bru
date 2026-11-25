@@ -1,0 +1,30 @@
+meta {
+  name: LoginInvalid
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "yamada@example.com",
+    "password": "wrong-password"
+  }
+}
+
+tests {
+  test("パスワード違いは 401", function () {
+    expect(res.status).to.equal(401);
+    expect(res.body.error.code).to.equal("unauthorized");
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

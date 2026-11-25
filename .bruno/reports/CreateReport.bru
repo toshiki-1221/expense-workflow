@@ -1,0 +1,53 @@
+meta {
+  name: CreateReport
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/reports
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "title": "11月 交通費",
+    "items": [
+      {
+        "category_id": 7,
+        "used_on": "2026-11-03",
+        "amount": 1240,
+        "description": "新宿→横浜 往復（客先訪問）"
+      }
+    ]
+  }
+}
+
+tests {
+  test("201 で明細つきの下書きが返る", function () {
+    expect(res.status).to.equal(201);
+    expect(res.body.status).to.equal("draft");
+    expect(res.body.approver).to.equal(null);
+    expect(res.body.items).to.have.lengthOf(1);
+    expect(res.body.items[0].category_name).to.be.a("string");
+    expect(res.body.total_amount).to.equal(1240);
+  });
+}
+
+script:post-response {
+  // 作った申請の id を GetReport で使う
+  if (res.status === 201) {
+    bru.setEnvVar("reportId", res.body.id);
+  }
+}
+
+docs {
+  category_id は GET /categories で返る id を使う。
+  ローカルDBではマイグレーションをやり直した影響で 7 から始まっている（7 = 交通費）。
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

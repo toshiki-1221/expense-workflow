@@ -1,0 +1,16 @@
+auth {
+  mode: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+docs {
+  # 認証
+  コレクション全体で `Authorization: Bearer {{token}}` を付ける。
+  各リクエストは `auth: inherit`（新規作成時の既定値）にしておけば自動で付く。
+  トークンが不要なリクエスト（auth/Login など）だけ `auth: none` にする。
+
+  `token` は auth/Login を実行すると自動で入る（環境 local を選んでおくこと）。
+}

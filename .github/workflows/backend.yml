@@ -1,0 +1,107 @@
+# backend のチェック（整形・vet・ビルド・テスト・sqlc の生成漏れ）
+#
+# - main 向けのプルリクエストと、main への push で動く
+# - backend を変えていないときは backend ジョブを飛ばす（ブランチ名ではなく変更されたパスで判定）
+# - main のブランチ保護では「backend-ci-result」だけを必須チェックにする
+#   （パスで飛ばしたジョブを必須にすると、frontend だけの PR がずっと「待ち」になるため、
+#     必ず結果を返すまとめ役のジョブを1つ置く）
+name: backend
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 同じ PR に続けて push したら、古い実行は止める
+concurrency:
+  group: backend-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read # paths-filter が PR の変更ファイル一覧を読むため
+
+jobs:
+  changes:
+    name: 変更の判定
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/backend.yml'
+
+  backend:
+    name: backend のチェック
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: 整形漏れがないか（gofmt）
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt されていないファイルがあります。gofmt -w で整形してください:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      # 生成コードもコミットしているので、SQL だけ直して sqlc generate を忘れていないかを見る。
+      # 生成ファイルの先頭に sqlc のバージョンが入るので、ローカルと同じバージョンに固定する
+      - uses: sqlc-dev/setup-sqlc@v4
+        with:
+          sqlc-version: '1.31.1'
+
+      - name: sqlc の生成漏れがないか
+        run: |
+          sqlc generate
+          if ! git diff --exit-code -- internal/db; then
+            echo "SQL と生成コードが合っていません。backend で sqlc generate を実行してコミットしてください"
+            exit 1
+          fi
+
+  # ブランチ保護で必須にするのはこのジョブだけ。
+  # backend を変えていない PR でも必ず実行され、backend ジョブが失敗・キャンセルされたときだけ落ちる
+  result:
+    name: backend-ci-result
+    needs: [changes, backend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 結果をまとめる
+        run: |
+          echo "changes: ${{ needs.changes.result }} / backend: ${{ needs.backend.result }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "変更の判定に失敗しました"
+            exit 1
+          fi
+          case "${{ needs.backend.result }}" in
+            success|skipped) echo "OK" ;;
+            *) echo "backend のチェックが通っていません"; exit 1 ;;
+          esac

@@ -1,0 +1,40 @@
+meta {
+  name: ListReports
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/reports?status=draft
+  body: none
+  auth: inherit
+}
+
+params:query {
+  status: draft
+}
+
+tests {
+  test("200 で {reports: [...]} が返る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.reports).to.be.an("array");
+  });
+
+  test("絞り込んだステータスだけが返る", function () {
+    res.body.reports.forEach(function (r) {
+      expect(r.status).to.equal("draft");
+      expect(r.total_amount).to.be.a("number");
+      expect(r.item_count).to.be.a("number");
+    });
+  });
+}
+
+docs {
+  status を外すと全ステータスが返る。
+  status は draft / submitted / approved / rejected / paid のどれか（それ以外は 400）。
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

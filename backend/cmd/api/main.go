@@ -1,0 +1,97 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/toshiki-1221/expense-workflow/internal/auth"
+	"github.com/toshiki-1221/expense-workflow/internal/config"
+	"github.com/toshiki-1221/expense-workflow/internal/db"
+	"github.com/toshiki-1221/expense-workflow/internal/domain"
+	"github.com/toshiki-1221/expense-workflow/internal/handler"
+	"github.com/toshiki-1221/expense-workflow/internal/middleware"
+	"github.com/toshiki-1221/expense-workflow/internal/repository"
+	"github.com/toshiki-1221/expense-workflow/internal/service"
+)
+
+// main はDB接続とHTTPサーバーを起動する。
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run は依存関係を組み立ててAPIサーバーを実行する。
+func run() error {
+	ctx := context.Background()
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("create database pool: %w", err)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+
+	queries := db.New(pool)
+	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL)
+
+	userRepository := repository.NewUserRepository(queries)
+	authService := service.NewAuthService(userRepository, tokens)
+	authHandler := handler.NewAuthHandler(authService)
+
+	categoryRepository := repository.NewCategoryRepository(queries)
+	categoryService := service.NewCategoryService(categoryRepository)
+	categoryHandler := handler.NewCategoryHandler(categoryService)
+
+	// 申請と明細をまとめて保存するので、トランザクション用に pool も渡す
+	reportRepository := repository.NewReportRepository(pool, queries)
+	reportService := service.NewReportService(reportRepository, userRepository)
+	reportHandler := handler.NewReportHandler(reportService)
+
+	r := gin.Default()
+	// 既定ではすべてのプロキシを信頼し、X-Forwarded-For で c.ClientIP() を偽装できてしまう。
+	// nil のときは誰も信頼せず、接続元のIPを使う。
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		return fmt.Errorf("set trusted proxies: %w", err)
+	}
+
+	v1 := r.Group("/api/v1")
+	v1.POST("/auth/login", authHandler.Login) // 認証不要はここだけ
+
+	// ここから下は認証必須
+	authed := v1.Group("", middleware.Authenticate(tokens))
+	authed.GET("/me", authHandler.Me)
+	authed.GET("/categories", categoryHandler.List)
+	authed.GET("/reports", reportHandler.List)
+	authed.POST("/reports", reportHandler.Create)
+	authed.GET("/reports/:id", reportHandler.Get)
+	authed.PUT("/reports/:id", reportHandler.Update)
+	authed.DELETE("/reports/:id", reportHandler.Delete)
+	authed.POST("/reports/:id/submit", reportHandler.Submit)
+	authed.GET("/approvals", reportHandler.ListApprovals)
+	authed.POST("/reports/:id/approve", reportHandler.Approve)
+	authed.POST("/reports/:id/reject", reportHandler.Reject)
+	// 経理だけが押せるが、404 / 403 / 409 の出し分けを他の操作と揃えるため CheckAction で判定する
+	authed.POST("/reports/:id/pay", reportHandler.Pay)
+
+	// ここから下は経理ロールだけ（ロールはトークンではなく毎回DBの最新値で判定する）
+	accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))
+	accounting.GET("/reports", reportHandler.ListForAccounting)
+
+	if err := r.Run(":" + cfg.Port); err != nil {
+		return fmt.Errorf("run HTTP server: %w", err)
+	}
+	return nil
+}

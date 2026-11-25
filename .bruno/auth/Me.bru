@@ -1,0 +1,23 @@
+meta {
+  name: Me
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/me
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("200 で自分の情報が返る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property("is_approver");
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

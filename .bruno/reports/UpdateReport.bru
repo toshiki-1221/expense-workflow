@@ -1,0 +1,53 @@
+meta {
+  name: UpdateReport
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/reports/{{reportId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "title": "11月 交通費（修正）",
+    "items": [
+      {
+        "category_id": 7,
+        "used_on": "2026-11-10",
+        "amount": 420,
+        "description": "渋谷→品川"
+      }
+    ]
+  }
+}
+
+tests {
+  test("200 で件名と明細が更新される", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.title).to.equal("11月 交通費（修正）");
+    expect(res.body.items).to.have.lengthOf(1);
+    expect(res.body.total_amount).to.equal(420);
+  });
+}
+
+docs {
+  CreateReport → UpdateReport の順に実行する（reportId は CreateReport で入る）。
+  明細は申請ごとまとめて送り、サーバーが差分で反映する。
+  - id あり：その明細を更新（id は変わらない）
+  - id なし：新しく追加
+  - いまあるのに送らなかった明細：削除
+  この例は id を付けていないので、CreateReport の明細は消えて1件追加になる。
+  既存の明細を残したいときは GetReport の items[].id を付けて送る。
+
+  - draft / rejected のときだけ。申請中などは 409
+  - この申請にない明細 id・存在しない科目・件名なし → 400
+  - 他人の申請 → 404
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
