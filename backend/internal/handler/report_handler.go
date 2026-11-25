@@ -26,6 +26,7 @@ type reportService interface {
 	ListMine(ctx context.Context, userID int64, status string) ([]domain.ReportSummary, error)
 	GetDetail(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Submit(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
+	Approve(ctx context.Context, userID, reportID int64) (*service.ReportDetail, error)
 	Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 	Delete(ctx context.Context, userID, reportID int64) error
 	ListPendingApprovals(ctx context.Context, userID int64) ([]domain.ReportSummary, error)
@@ -396,6 +397,22 @@ func (h *ReportHandler) Submit(c *gin.Context) {
 	detail, err := h.service.Submit(c.Request.Context(), userID, reportID)
 	if err != nil {
 		writeReportError(c, err, "submit report")
+		return
+	}
+	c.JSON(http.StatusOK, toReportResponse(detail))
+}
+
+// Approve は申請を承認する（submitted → approved）。ボディは不要。
+// POST /api/v1/reports/:id/approve
+func (h *ReportHandler) Approve(c *gin.Context) {
+	userID, reportID, ok := userAndReportID(c)
+	if !ok {
+		return
+	}
+
+	detail, err := h.service.Approve(c.Request.Context(), userID, reportID)
+	if err != nil {
+		writeReportError(c, err, "approve report")
 		return
 	}
 	c.JSON(http.StatusOK, toReportResponse(detail))

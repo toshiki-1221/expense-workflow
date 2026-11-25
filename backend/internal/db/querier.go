@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	// この申請の承認者で、申請中のときだけ承認済みにし、履歴を1行追加する
 	ApproveExpenseReport(ctx context.Context, arg ApproveExpenseReportParams) (ApproveExpenseReportRow, error)
 	CountAccountingExpenseReports(ctx context.Context, status *string) (int64, error)
 	CreateExpenseItem(ctx context.Context, arg CreateExpenseItemParams) (ExpenseItem, error)

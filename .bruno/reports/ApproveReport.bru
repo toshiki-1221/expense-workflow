@@ -1,0 +1,33 @@
+meta {
+  name: ApproveReport
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/reports/{{reportId}}/approve
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("200 で承認済みになり、履歴に approve が入る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("approved");
+    expect(res.body.logs[res.body.logs.length - 1].action).to.equal("approve");
+    expect(res.body.allowed_actions).to.deep.equal([]);
+  });
+}
+
+docs {
+  yamada で CreateReport → SubmitReport を実行したあと、
+  承認者の sato@example.com でログインし直してから実行する。
+
+  - この申請の承認者だけ。申請者本人・経理 → 403、無関係の人 → 404
+  - 申請中以外（下書き・もう承認済みなど） → 409
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -165,12 +165,12 @@ WITH updated AS (
     UPDATE expense_reports er
     SET status = 'approved', updated_at = CURRENT_TIMESTAMP
     WHERE er.id = sqlc.arg(report_id)
-      AND er.approver_id = sqlc.arg(actor_id)
+      AND er.approver_id = sqlc.arg(actor_id)::bigint
       AND er.status = 'submitted'
     RETURNING er.id, er.user_id, er.approver_id, er.title, er.status, er.submitted_at, er.created_at, er.updated_at
 ), logged AS (
     INSERT INTO approval_logs (report_id, actor_id, action, from_status, to_status)
-    SELECT updated.id, sqlc.arg(actor_id), 'approve', 'submitted', 'approved' FROM updated
+    SELECT updated.id, sqlc.arg(actor_id)::bigint, 'approve', 'submitted', 'approved' FROM updated
 )
 SELECT * FROM updated;
 

@@ -21,6 +21,7 @@ type reportRepository interface {
 	ListReports(ctx context.Context, userID int64, status *domain.ReportStatus) ([]domain.ReportSummary, error)
 	GetReport(ctx context.Context, id int64) (*domain.Report, error)
 	SubmitReport(ctx context.Context, reportID, userID int64) error
+	ApproveReport(ctx context.Context, reportID, approverID int64) error
 	UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error
 	DeleteReport(ctx context.Context, reportID, userID int64) error
 	ListPendingApprovals(ctx context.Context, approverID int64) ([]domain.ReportSummary, error)
@@ -99,6 +100,24 @@ func (s *ReportService) Submit(ctx context.Context, userID, reportID int64) (*Re
 
 	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
 	if err := s.repository.SubmitReport(ctx, reportID, userID); err != nil {
+		return nil, err
+	}
+	return s.GetDetail(ctx, userID, reportID)
+}
+
+// Approve は申請を承認し（submitted → approved）、承認後の詳細を返す。
+// 押せるのは、この申請の承認者だけ（申請した時点で決まった approver_id）。
+func (s *ReportService) Approve(ctx context.Context, userID, reportID int64) (*ReportDetail, error) {
+	viewer, report, err := s.load(ctx, userID, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if err := report.CheckAction(viewer, domain.ReportActionApprove); err != nil {
+		return nil, err
+	}
+
+	// 上のチェックのあとに別の操作で状態が変わっていても、SQL の条件付きUPDATEで弾かれる
+	if err := s.repository.ApproveReport(ctx, reportID, userID); err != nil {
 		return nil, err
 	}
 	return s.GetDetail(ctx, userID, reportID)

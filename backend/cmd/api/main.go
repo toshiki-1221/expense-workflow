@@ -80,6 +80,7 @@ func run() error {
 	authed.DELETE("/reports/:id", reportHandler.Delete)
 	authed.POST("/reports/:id/submit", reportHandler.Submit)
 	authed.GET("/approvals", reportHandler.ListApprovals)
+	authed.POST("/reports/:id/approve", reportHandler.Approve)
 	// 経理APIを作るとき:
 	// accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))
 
