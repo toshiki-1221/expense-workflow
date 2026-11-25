@@ -356,6 +356,46 @@ func (r *ReportRepository) ListPendingApprovals(ctx context.Context, approverID 
 	return reports, nil
 }
 
+// ListAccountingReports は経理の一覧（下書き以外の全員の申請）を1ページ分と、同じ条件の総件数を返す。
+// status が nil なら下書き以外の全ステータス。page は 1 始まり。
+func (r *ReportRepository) ListAccountingReports(ctx context.Context, status *domain.ReportStatus, page, perPage int32) ([]domain.ReportSummary, int64, error) {
+	var statusArg *string
+	if status != nil {
+		s := string(*status)
+		statusArg = &s
+	}
+
+	total, err := r.queries.CountAccountingExpenseReports(ctx, statusArg)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count accounting expense reports: %w", err)
+	}
+	rows, err := r.queries.ListAccountingExpenseReports(ctx, db.ListAccountingExpenseReportsParams{
+		Status:  statusArg,
+		Page:    page,
+		PerPage: perPage,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("list accounting expense reports: %w", err)
+	}
+
+	reports := make([]domain.ReportSummary, 0, len(rows))
+	for _, row := range rows {
+		reports = append(reports, domain.ReportSummary{
+			ID:          row.ID,
+			UserID:      row.UserID,
+			UserName:    row.UserName,
+			Title:       row.Title,
+			Status:      domain.ReportStatus(row.Status),
+			TotalAmount: row.TotalAmount,
+			ItemCount:   row.ItemCount,
+			SubmittedAt: row.SubmittedAt,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		})
+	}
+	return reports, total, nil
+}
+
 // toDomainReport はsqlcの申請行をドメインの申請に変換する（明細は含まない）。
 func toDomainReport(row db.ExpenseReport) *domain.Report {
 	return &domain.Report{

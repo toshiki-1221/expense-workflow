@@ -27,6 +27,22 @@ type reportRepository interface {
 	UpdateReport(ctx context.Context, reportID, userID int64, title string, items []domain.ReportItemInput) error
 	DeleteReport(ctx context.Context, reportID, userID int64) error
 	ListPendingApprovals(ctx context.Context, approverID int64) ([]domain.ReportSummary, error)
+	ListAccountingReports(ctx context.Context, status *domain.ReportStatus, page, perPage int32) ([]domain.ReportSummary, int64, error)
+}
+
+// ページングの既定値と上限（経理の一覧だけページングする）。
+const (
+	DefaultPerPage = 20
+	MaxPerPage     = 100
+)
+
+// ReportPage は経理の一覧の1ページ分と、ページ送りに使う情報を表す。
+type ReportPage struct {
+	Reports    []domain.ReportSummary
+	Page       int
+	PerPage    int
+	TotalCount int64
+	TotalPages int64 // 0件のときは 0
 }
 
 // userFinder はログイン中のユーザー（ロール・承認者）を取得する振る舞いを定義する。
@@ -229,6 +245,40 @@ func (s *ReportService) ListMine(ctx context.Context, userID int64, status strin
 // 誰でも呼べる。承認者になっていない人は空の一覧になる（ロールでは弾かない）。
 func (s *ReportService) ListPendingApprovals(ctx context.Context, userID int64) ([]domain.ReportSummary, error) {
 	return s.repository.ListPendingApprovals(ctx, userID)
+}
+
+// ListForAccounting は経理の一覧を1ページ分取得する。経理ロールかどうかはルートのミドルウェアで確認済み。
+// 下書きは出さない。status が空なら下書き以外の全ステータス。
+// 最後のページより先を指定されたときは、エラーにせず空の一覧を返す。
+func (s *ReportService) ListForAccounting(ctx context.Context, status string, page, perPage int) (*ReportPage, error) {
+	invalid := func(msg string) error { return &domain.ValidationError{Message: msg} }
+
+	var st *domain.ReportStatus
+	if status != "" {
+		v := domain.ReportStatus(status)
+		if !v.Valid() || v == domain.ReportStatusDraft {
+			return nil, invalid("status は submitted / approved / rejected / paid のどれかを指定してください")
+		}
+		st = &v
+	}
+	if page < 1 {
+		return nil, invalid("page は1以上で指定してください")
+	}
+	if perPage < 1 || perPage > MaxPerPage {
+		return nil, invalid(fmt.Sprintf("per_page は1〜%dで指定してください", MaxPerPage))
+	}
+
+	reports, total, err := s.repository.ListAccountingReports(ctx, st, int32(page), int32(perPage))
+	if err != nil {
+		return nil, err
+	}
+	return &ReportPage{
+		Reports:    reports,
+		Page:       page,
+		PerPage:    perPage,
+		TotalCount: total,
+		TotalPages: (total + int64(perPage) - 1) / int64(perPage), // 切り上げ
+	}, nil
 }
 
 // validateDraft は件名と明細の必須・桁数をチェックする。

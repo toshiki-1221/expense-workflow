@@ -13,9 +13,11 @@ import (
 const countAccountingExpenseReports = `-- name: CountAccountingExpenseReports :one
 SELECT COUNT(*)
 FROM expense_reports er
-WHERE $1::varchar IS NULL OR er.status = $1::varchar
+WHERE er.status <> 'draft'
+  AND ($1::varchar IS NULL OR er.status = $1::varchar)
 `
 
+// 一覧と同じ条件の総件数（ページ数を出すため）
 func (q *Queries) CountAccountingExpenseReports(ctx context.Context, status *string) (int64, error) {
 	row := q.db.QueryRow(ctx, countAccountingExpenseReports, status)
 	var count int64
@@ -24,15 +26,26 @@ func (q *Queries) CountAccountingExpenseReports(ctx context.Context, status *str
 }
 
 const listAccountingExpenseReports = `-- name: ListAccountingExpenseReports :many
-SELECT er.id, er.user_id, submitter.name AS user_name,
-       er.approver_id, er.title, er.status, er.submitted_at,
-       er.created_at, er.updated_at
+SELECT
+    er.id,
+    er.user_id,
+    submitter.name AS user_name,
+    er.title,
+    er.status,
+    er.submitted_at,
+    er.created_at,
+    er.updated_at,
+    COALESCE(SUM(ei.amount), 0)::bigint AS total_amount,
+    COUNT(ei.id)::bigint AS item_count
 FROM expense_reports er
 JOIN users submitter ON submitter.id = er.user_id
-WHERE $1::varchar IS NULL OR er.status = $1::varchar
-ORDER BY er.created_at DESC, er.id DESC
+LEFT JOIN expense_items ei ON ei.report_id = er.id
+WHERE er.status <> 'draft'
+  AND ($1::varchar IS NULL OR er.status = $1::varchar)
+GROUP BY er.id, submitter.name
+ORDER BY er.submitted_at DESC, er.id DESC
 LIMIT $3::int
-OFFSET GREATEST($2::int - 1, 0) * $3::int
+OFFSET ($2::int - 1) * $3::int
 `
 
 type ListAccountingExpenseReportsParams struct {
@@ -45,14 +58,17 @@ type ListAccountingExpenseReportsRow struct {
 	ID          int64
 	UserID      int64
 	UserName    string
-	ApproverID  *int64
 	Title       string
 	Status      string
 	SubmittedAt *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	TotalAmount int64
+	ItemCount   int64
 }
 
+// 経理の一覧。下書きは申請者の作業中なので出さない（一度でも申請したものだけ）。
+// 新しく申請された順。オフセット方式でページングする（page は 1 始まり）。
 func (q *Queries) ListAccountingExpenseReports(ctx context.Context, arg ListAccountingExpenseReportsParams) ([]ListAccountingExpenseReportsRow, error) {
 	rows, err := q.db.Query(ctx, listAccountingExpenseReports, arg.Status, arg.Page, arg.PerPage)
 	if err != nil {
@@ -66,12 +82,13 @@ func (q *Queries) ListAccountingExpenseReports(ctx context.Context, arg ListAcco
 			&i.ID,
 			&i.UserID,
 			&i.UserName,
-			&i.ApproverID,
 			&i.Title,
 			&i.Status,
 			&i.SubmittedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TotalAmount,
+			&i.ItemCount,
 		); err != nil {
 			return nil, err
 		}

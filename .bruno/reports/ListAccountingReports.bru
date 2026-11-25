@@ -1,0 +1,44 @@
+meta {
+  name: ListAccountingReports
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/accounting/reports?status=approved&page=1&per_page=20
+  body: none
+  auth: inherit
+}
+
+params:query {
+  status: approved
+  page: 1
+  per_page: 20
+}
+
+tests {
+  test("200 で1ページ分とページ情報が返る", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.reports).to.be.an("array");
+    expect(res.body.pagination.page).to.equal(1);
+    expect(res.body.pagination.per_page).to.equal(20);
+    expect(res.body.pagination.total_count).to.be.a("number");
+    res.body.reports.forEach(function (r) {
+      expect(r.status).to.equal("approved");
+    });
+  });
+}
+
+docs {
+  経理の keiri@example.com でログインしてから実行する。経理以外は 403。
+
+  - 下書きは出さない（status=draft は 400）。status なしなら下書き以外の全部
+  - 新しく申請された順
+  - page は1始まり（既定1）、per_page は既定20・最大100。範囲外・数字以外は 400
+  - 最後のページより先は空の配列（total_count・total_pages はそのまま）
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

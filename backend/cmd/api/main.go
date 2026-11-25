@@ -11,6 +11,7 @@ import (
 	"github.com/toshiki-1221/expense-workflow/internal/auth"
 	"github.com/toshiki-1221/expense-workflow/internal/config"
 	"github.com/toshiki-1221/expense-workflow/internal/db"
+	"github.com/toshiki-1221/expense-workflow/internal/domain"
 	"github.com/toshiki-1221/expense-workflow/internal/handler"
 	"github.com/toshiki-1221/expense-workflow/internal/middleware"
 	"github.com/toshiki-1221/expense-workflow/internal/repository"
@@ -82,8 +83,10 @@ func run() error {
 	authed.GET("/approvals", reportHandler.ListApprovals)
 	authed.POST("/reports/:id/approve", reportHandler.Approve)
 	authed.POST("/reports/:id/reject", reportHandler.Reject)
-	// 経理APIを作るとき:
-	// accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))
+
+	// ここから下は経理ロールだけ（ロールはトークンではなく毎回DBの最新値で判定する）
+	accounting := authed.Group("/accounting", middleware.RequireRole(authService, domain.RoleAccounting))
+	accounting.GET("/reports", reportHandler.ListForAccounting)
 
 	if err := r.Run(":" + cfg.Port); err != nil {
 		return fmt.Errorf("run HTTP server: %w", err)

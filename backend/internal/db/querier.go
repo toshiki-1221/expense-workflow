@@ -10,6 +10,7 @@ import (
 
 type Querier interface {
 	ApproveExpenseReport(ctx context.Context, arg ApproveExpenseReportParams) (ApproveExpenseReportRow, error)
+	// 一覧と同じ条件の総件数（ページ数を出すため）
 	CountAccountingExpenseReports(ctx context.Context, status *string) (int64, error)
 	CreateExpenseItem(ctx context.Context, arg CreateExpenseItemParams) (ExpenseItem, error)
 	CreateExpenseReport(ctx context.Context, arg CreateExpenseReportParams) (ExpenseReport, error)
@@ -20,6 +21,8 @@ type Querier interface {
 	GetExpenseReportDetail(ctx context.Context, id int64) (GetExpenseReportDetailRow, error)
 	GetMe(ctx context.Context, id int64) (GetMeRow, error)
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
+	// 経理の一覧。下書きは申請者の作業中なので出さない（一度でも申請したものだけ）。
+	// 新しく申請された順。オフセット方式でページングする（page は 1 始まり）。
 	ListAccountingExpenseReports(ctx context.Context, arg ListAccountingExpenseReportsParams) ([]ListAccountingExpenseReportsRow, error)
 	ListExpenseCategories(ctx context.Context) ([]ExpenseCategory, error)
 	ListExpenseReportApprovalLogs(ctx context.Context, reportID int64) ([]ListExpenseReportApprovalLogsRow, error)

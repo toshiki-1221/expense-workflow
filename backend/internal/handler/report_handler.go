@@ -31,6 +31,7 @@ type reportService interface {
 	Update(ctx context.Context, userID, reportID int64, title string, items []domain.ReportItemInput) (*service.ReportDetail, error)
 	Delete(ctx context.Context, userID, reportID int64) error
 	ListPendingApprovals(ctx context.Context, userID int64) ([]domain.ReportSummary, error)
+	ListForAccounting(ctx context.Context, status string, page, perPage int) (*service.ReportPage, error)
 }
 
 // ReportHandler は経費申請APIのHTTP処理を担当する。
@@ -173,8 +174,8 @@ type listReportsResponse struct {
 	Reports []reportSummaryResponse `json:"reports"`
 }
 
-// approvalSummaryResponse は承認待ち一覧の1件分を表す。自分の一覧と違い、誰の申請かを付ける。
-type approvalSummaryResponse struct {
+// reportWithUserResponse は承認待ち・経理の一覧の1件分を表す。自分の一覧と違い、誰の申請かを付ける。
+type reportWithUserResponse struct {
 	ID          int64          `json:"id"`
 	User        personResponse `json:"user"`
 	Title       string         `json:"title"`
@@ -188,7 +189,40 @@ type approvalSummaryResponse struct {
 
 // listApprovalsResponse は承認待ち一覧を {"reports": [...]} で包んだ形を表す（自分の一覧と揃える）。
 type listApprovalsResponse struct {
-	Reports []approvalSummaryResponse `json:"reports"`
+	Reports []reportWithUserResponse `json:"reports"`
+}
+
+// paginationResponse はページ送りに使う情報を表す。
+type paginationResponse struct {
+	Page       int   `json:"page"`
+	PerPage    int   `json:"per_page"`
+	TotalCount int64 `json:"total_count"`
+	TotalPages int64 `json:"total_pages"`
+}
+
+// accountingReportsResponse は経理の一覧。{"reports": [...]} に pagination を足した形。
+type accountingReportsResponse struct {
+	Reports    []reportWithUserResponse `json:"reports"`
+	Pagination paginationResponse       `json:"pagination"`
+}
+
+// toReportsWithUser は一覧の申請を、申請者つきのレスポンス形式に変換する。
+func toReportsWithUser(reports []domain.ReportSummary) []reportWithUserResponse {
+	items := make([]reportWithUserResponse, 0, len(reports))
+	for _, r := range reports {
+		items = append(items, reportWithUserResponse{
+			ID:          r.ID,
+			User:        personResponse{ID: r.UserID, Name: r.UserName},
+			Title:       r.Title,
+			Status:      string(r.Status),
+			TotalAmount: r.TotalAmount,
+			ItemCount:   r.ItemCount,
+			SubmittedAt: r.SubmittedAt,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		})
+	}
+	return items
 }
 
 // toItemInputs はリクエストの明細をServiceへの入力に変換する。利用日の形式だけここで見る。
@@ -310,21 +344,54 @@ func (h *ReportHandler) ListApprovals(c *gin.Context) {
 		return
 	}
 
-	items := make([]approvalSummaryResponse, 0, len(reports))
-	for _, r := range reports {
-		items = append(items, approvalSummaryResponse{
-			ID:          r.ID,
-			User:        personResponse{ID: r.UserID, Name: r.UserName},
-			Title:       r.Title,
-			Status:      string(r.Status),
-			TotalAmount: r.TotalAmount,
-			ItemCount:   r.ItemCount,
-			SubmittedAt: r.SubmittedAt,
-			CreatedAt:   r.CreatedAt,
-			UpdatedAt:   r.UpdatedAt,
-		})
+	c.JSON(http.StatusOK, listApprovalsResponse{Reports: toReportsWithUser(reports)})
+}
+
+// ListForAccounting は経理の一覧（下書き以外の全員の申請）を1ページ分返す。経理ロールだけ。
+// ?status= で絞り込み、?page=（1始まり、既定1）&per_page=（既定20、最大100）でページを指定する。
+// GET /api/v1/accounting/reports
+func (h *ReportHandler) ListForAccounting(c *gin.Context) {
+	page, err := intQuery(c, "page", 1)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "page は数字で指定してください")
+		return
 	}
-	c.JSON(http.StatusOK, listApprovalsResponse{Reports: items})
+	perPage, err := intQuery(c, "per_page", service.DefaultPerPage)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "per_page は数字で指定してください")
+		return
+	}
+
+	result, err := h.service.ListForAccounting(c.Request.Context(), c.Query("status"), page, perPage)
+	var verr *domain.ValidationError
+	switch {
+	case errors.As(err, &verr):
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, verr.Message)
+		return
+	case err != nil:
+		log.Printf("list accounting reports failed: %v", err)
+		response.Error(c, http.StatusInternalServerError, response.CodeInternal, "internal server error")
+		return
+	}
+
+	c.JSON(http.StatusOK, accountingReportsResponse{
+		Reports: toReportsWithUser(result.Reports),
+		Pagination: paginationResponse{
+			Page:       result.Page,
+			PerPage:    result.PerPage,
+			TotalCount: result.TotalCount,
+			TotalPages: result.TotalPages,
+		},
+	})
+}
+
+// intQuery はクエリパラメータを整数で取り出す。指定がなければ def を返す。
+func intQuery(c *gin.Context, key string, def int) (int, error) {
+	v := c.Query(key)
+	if v == "" {
+		return def, nil
+	}
+	return strconv.Atoi(v)
 }
 
 // Get は申請の詳細（明細・履歴・押せるボタン）を返す。
